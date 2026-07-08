@@ -1,4 +1,3 @@
-import calendar
 import json
 import os
 import subprocess
@@ -90,22 +89,14 @@ def festivos_colombia(anio):
     return festivos
 
 
-def calcular_horas_esperadas(anio, mes, dia_fin=None):
-    festivos = festivos_colombia(anio)
-    total_dias = calendar.monthrange(anio, mes)[1]
-    if dia_fin is None:
-        dia_fin = total_dias
-    dia_fin = max(0, min(dia_fin, total_dias))
-    horas = 0.0
-    for d in range(1, dia_fin + 1):
-        fecha = date(anio, mes, d)
-        if fecha in festivos:
-            continue
-        if fecha.weekday() < 5:
-            horas += HORAS_DIA_SEMANA
-        elif fecha.weekday() == 5:
-            horas += HORAS_SABADO
-    return horas
+def horas_esperadas_dia(fecha):
+    if fecha in festivos_colombia(fecha.year):
+        return 0.0
+    if fecha.weekday() < 5:
+        return HORAS_DIA_SEMANA
+    if fecha.weekday() == 5:
+        return HORAS_SABADO
+    return 0.0
 
 TIPO_ACTIVIDAD_OPTIONS = [
     "Gestion/Trabajo administrativo",
@@ -221,7 +212,7 @@ def save_json(path, data):
         json.dump(data, f, ensure_ascii=False, indent=2)
 
 
-APP_VERSION = "1.3.0"
+APP_VERSION = "1.4.0"
 UPDATE_REPO = "AlexxAlmeida18/Bitacora-Diaria"
 
 NOTIF_TASK_NAME = "BitacoraDiaria Recordatorios"
@@ -837,7 +828,7 @@ class BitacoraApp:
             return canvas, estado_var, estado_label, detalle_var
 
         (self.cumplimiento_canvas, self.cumplimiento_estado_var,
-         self.cumplimiento_estado_label, self.cumplimiento_detalle_var) = _fila_barra("Horas del mes")
+         self.cumplimiento_estado_label, self.cumplimiento_detalle_var) = _fila_barra("Horas de hoy")
         (self.actividad_canvas, self.actividad_estado_var,
          self.actividad_estado_label, self.actividad_detalle_var) = _fila_barra("Actividad de hoy")
 
@@ -869,24 +860,15 @@ class BitacoraApp:
 
     def actualizar_cumplimiento_mensual(self):
         hoy = date.today()
-        anio, mes = hoy.year, hoy.month
-
-        horas_esperadas_mes = calcular_horas_esperadas(anio, mes)
-        horas_esperadas_hoy = calcular_horas_esperadas(anio, mes, dia_fin=hoy.day)
+        horas_esperadas_hoy = horas_esperadas_dia(hoy)
 
         horas_registradas = 0.0
-        for fecha_str, entrada in self.data.items():
-            try:
-                f = date.fromisoformat(fecha_str)
-            except ValueError:
-                continue
-            if f.year != anio or f.month != mes:
-                continue
-            for act in entrada.get("activities", []):
-                ini = self._minutos(act.get("inicio", ""))
-                fin = self._minutos(act.get("fin", ""))
-                if ini is not None and fin is not None and fin > ini:
-                    horas_registradas += (fin - ini) / 60
+        entrada = self.data.get(hoy.isoformat(), {})
+        for act in entrada.get("activities", []):
+            ini = self._minutos(act.get("inicio", ""))
+            fin = self._minutos(act.get("fin", ""))
+            if ini is not None and fin is not None and fin > ini:
+                horas_registradas += (fin - ini) / 60
 
         self._cumplimiento_ratio = (
             horas_registradas / horas_esperadas_hoy if horas_esperadas_hoy > 0 else 1.0
