@@ -212,7 +212,7 @@ def save_json(path, data):
         json.dump(data, f, ensure_ascii=False, indent=2)
 
 
-APP_VERSION = "1.4.0"
+APP_VERSION = "1.4.1"
 UPDATE_REPO = "AlexxAlmeida18/Bitacora-Diaria"
 
 NOTIF_TASK_NAME = "BitacoraDiaria Recordatorios"
@@ -610,6 +610,8 @@ class ActivityRow:
         self.badge_var.set("✓ Enviado")
         if self.expanded:
             self.toggle()
+        if self.on_change:
+            self.on_change()
 
     def _field(self, parent, label, kind, values, width, page_bg, expand=False):
         wrap = tk.Frame(parent, bg=page_bg)
@@ -639,6 +641,8 @@ class ActivityRow:
         self.accion.set(data.get("accion", ""))
         self.detalle.delete(0, tk.END)
         self.detalle.insert(0, data.get("detalle", ""))
+        if data.get("enviado"):
+            self.marcar_enviado()
 
     def get(self):
         return {
@@ -647,6 +651,7 @@ class ActivityRow:
             "tipo": self.tipo.get().strip(),
             "accion": self.accion.get().strip(),
             "detalle": self.detalle.get().strip(),
+            "enviado": self.enviado,
         }
 
     def destroy(self):
