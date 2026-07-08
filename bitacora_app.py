@@ -862,6 +862,14 @@ class BitacoraApp:
         hoy = date.today()
         horas_esperadas_hoy = horas_esperadas_dia(hoy)
 
+        if horas_esperadas_hoy <= 0:
+            self._cumplimiento_ratio = 0.0
+            self.cumplimiento_detalle_var.set("Día no laboral")
+            self.cumplimiento_estado_var.set("")
+            self.cumplimiento_estado_label.config(fg=TEXT_SECONDARY)
+            self._dibujar_barra(self.cumplimiento_canvas, 0.0, BORDER)
+            return
+
         horas_registradas = 0.0
         entrada = self.data.get(hoy.isoformat(), {})
         for act in entrada.get("activities", []):
@@ -870,9 +878,7 @@ class BitacoraApp:
             if ini is not None and fin is not None and fin > ini:
                 horas_registradas += (fin - ini) / 60
 
-        self._cumplimiento_ratio = (
-            horas_registradas / horas_esperadas_hoy if horas_esperadas_hoy > 0 else 1.0
-        )
+        self._cumplimiento_ratio = horas_registradas / horas_esperadas_hoy
 
         self.cumplimiento_detalle_var.set(f"{horas_registradas:.1f}h / {horas_esperadas_hoy:.1f}h")
         nivel, color = self._nivel_3(self._cumplimiento_ratio)
