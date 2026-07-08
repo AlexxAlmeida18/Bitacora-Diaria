@@ -778,15 +778,12 @@ class BitacoraApp:
             self.agregar_fila()
         self.actualizar_contador()
         self.actualizar_cumplimiento_mensual()
-        self.actualizar_actividad_hoy()
 
-        self._recordatorio_umbral = 0
-        self._notificaciones_pausadas_fecha = None
         self._tocar_heartbeat()
         self._actualizar_reloj()
         self._autoguardado_job = None
         self.root.after(30000, self._tick_autoguardado)
-        self.root.after(60000, self._verificar_recordatorio)
+        self.root.after(60000, self._tick_periodico)
         threading.Thread(target=_asegurar_tarea_programada, daemon=True).start()
         threading.Thread(target=self._revisar_actualizaciones, daemon=True).start()
 
@@ -834,8 +831,6 @@ class BitacoraApp:
 
         (self.cumplimiento_canvas, self.cumplimiento_estado_var,
          self.cumplimiento_estado_label, self.cumplimiento_detalle_var) = _fila_barra("Horas de hoy")
-        (self.actividad_canvas, self.actividad_estado_var,
-         self.actividad_estado_label, self.actividad_detalle_var) = _fila_barra("Actividad de hoy")
 
     def _dibujar_barra(self, canvas, ratio, color=None):
         canvas.delete("all")
@@ -885,33 +880,6 @@ class BitacoraApp:
         self.cumplimiento_estado_label.config(fg=color)
 
         self._dibujar_barra(self.cumplimiento_canvas, self._cumplimiento_ratio, color)
-
-    def actualizar_actividad_hoy(self):
-        ahora = datetime.now()
-        ahora_min = ahora.hour * 60 + ahora.minute
-        inicio_jornada = 7 * 60 + 30
-
-        ultima_fin = self._fin_mas_reciente_hoy()
-        ultima_fin_min = self._minutos(ultima_fin) if ultima_fin else inicio_jornada
-
-        transcurrido = max(1, ahora_min - inicio_jornada)
-        cubierto = max(0, min(ultima_fin_min, ahora_min) - inicio_jornada)
-        ratio = cubierto / transcurrido
-
-        gap = ahora_min - ultima_fin_min
-        if gap < 30:
-            nivel, color = "Excelente", SUCCESS
-        elif gap < 60:
-            nivel, color = "Regular", WARNING
-        else:
-            nivel, color = "Mal", DANGER
-
-        self._actividad_ratio = 1.0 if gap < 60 else ratio
-        self.actividad_estado_var.set(nivel)
-        self.actividad_estado_label.config(fg=color)
-        self.actividad_detalle_var.set(f"Última hora: {ultima_fin}" if ultima_fin else "Sin actividades hoy")
-
-        self._dibujar_barra(self.actividad_canvas, self._actividad_ratio, color)
 
     def _build_datos_card(self, parent):
         parent.configure(padx=20, pady=18)
@@ -986,23 +954,6 @@ class BitacoraApp:
                     return act["fin"]
         return None
 
-    def _fin_mas_reciente_hoy(self):
-        hoy = date.today().isoformat()
-        candidatos = []
-        entrada = self.data.get(hoy)
-        if entrada:
-            for act in entrada.get("activities", []):
-                if act.get("fin"):
-                    candidatos.append(act["fin"])
-        if self.fecha_var.get().strip() == hoy:
-            for row in self.rows:
-                fin = row.fin.get().strip()
-                if fin:
-                    candidatos.append(fin)
-        if not candidatos:
-            return None
-        return max(candidatos, key=self._minutos)
-
     @staticmethod
     def _tocar_heartbeat():
         try:
@@ -1068,70 +1019,10 @@ class BitacoraApp:
             self.root.after(0, lambda: messagebox.showerror("Bitácora", f"No se pudo actualizar:\n{msg}"))
             self.root.after(0, lambda: self.status_var.set(""))
 
-    def _verificar_recordatorio(self):
-        self.root.after(5 * 60 * 1000, self._verificar_recordatorio)
+    def _tick_periodico(self):
+        self.root.after(5 * 60 * 1000, self._tick_periodico)
         self._tocar_heartbeat()
-        self.actualizar_actividad_hoy()
-
-        hoy = date.today().isoformat()
-        if getattr(self, "_recordatorio_fecha", None) != hoy:
-            self._recordatorio_fecha = hoy
-            self._recordatorio_umbral = 0
-
-        if getattr(self, "_notificaciones_pausadas_fecha", None) == hoy:
-            return
-
-        ahora = datetime.now()
-        ahora_min = ahora.hour * 60 + ahora.minute
-        en_horario = (7 * 60 + 30 <= ahora_min <= 12 * 60) or (14 * 60 <= ahora_min <= 17 * 60)
-        if not en_horario:
-            return
-
-        ultima_fin = self._fin_mas_reciente_hoy()
-        ultima_fin_min = self._minutos(ultima_fin) if ultima_fin else 7 * 60 + 30
-        gap = ahora_min - ultima_fin_min
-        if gap < 60:
-            self._recordatorio_umbral = 0
-            return
-
-        umbral_actual = (gap // 60) * 60
-        if umbral_actual > self._recordatorio_umbral:
-            self._recordatorio_umbral = umbral_actual
-            self._mostrar_recordatorio(ultima_fin)
-
-    def _mostrar_recordatorio(self, ultima_fin):
-        toast = tk.Toplevel(self.root)
-        toast.overrideredirect(True)
-        toast.attributes("-topmost", True)
-        toast.configure(bg=CARD_BG, highlightthickness=1, highlightbackground=BORDER, highlightcolor=BORDER)
-
-        ancho, alto = 360, 120
-        screen_w = toast.winfo_screenwidth()
-        screen_h = toast.winfo_screenheight()
-        x = (screen_w - ancho) // 2
-        y = (screen_h - alto) // 2
-        toast.geometry(f"{ancho}x{alto}+{x}+{y}")
-        toast.lift()
-        toast.focus_force()
-
-        contenido = tk.Frame(toast, bg=CARD_BG, padx=16, pady=14)
-        contenido.pack(fill="both", expand=True)
-
-        header = tk.Frame(contenido, bg=CARD_BG)
-        header.pack(fill="x")
-        tk.Label(header, text="⏰ Bitácora", font=F_LABEL_BOLD, bg=CARD_BG, fg=TEXT_PRIMARY).pack(side="left")
-        cerrar = tk.Label(header, text="✕", font=F_LABEL, bg=CARD_BG, fg=TEXT_SECONDARY, cursor="hand2")
-        cerrar.pack(side="right")
-        cerrar.bind("<Button-1>", lambda e: toast.destroy())
-
-        if ultima_fin:
-            mensaje = f"No has registrado actividad desde las {ultima_fin}. ¿Qué has hecho desde entonces?"
-        else:
-            mensaje = "Aún no has registrado ninguna actividad hoy."
-        tk.Label(contenido, text=mensaje, font=F_LABEL, bg=CARD_BG, fg=TEXT_SECONDARY,
-                 wraplength=320, justify="left").pack(anchor="w", pady=(8, 0))
-
-        toast.after(15000, lambda: toast.destroy() if toast.winfo_exists() else None)
+        self.actualizar_cumplimiento_mensual()
 
     def _semanas_disponibles(self):
         lunes_set = set()
@@ -1179,10 +1070,10 @@ class BitacoraApp:
             fin = row.fin.get().strip()
             if fin:
                 self.ultima_hora_var.set(fin)
-                self.actualizar_actividad_hoy()
+                self.actualizar_cumplimiento_mensual()
                 return
         self.ultima_hora_var.set(self._ultima_hora_registrada() or "--:--")
-        self.actualizar_actividad_hoy()
+        self.actualizar_cumplimiento_mensual()
 
     def quitar_fila(self, row):
         row.destroy()
@@ -1611,9 +1502,7 @@ class BitacoraApp:
         self.refresh_historial()
         self.actualizar_contador()
         self.actualizar_cumplimiento_mensual()
-        self.actualizar_actividad_hoy()
         if fecha == date.today().isoformat():
-            self._notificaciones_pausadas_fecha = fecha
             save_json(NOTIF_STATE_FILE, {"fecha": fecha, "umbral": 0, "pausada": True})
         self.status_var.set(f"Día {fecha} guardado en {DATA_FILE}")
 
