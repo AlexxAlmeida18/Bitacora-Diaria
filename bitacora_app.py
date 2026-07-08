@@ -532,8 +532,10 @@ def fill_erp_form(driver, cedula, tipo, accion, detalle, inicio, fin):
 
 
 class ActivityRow:
-    def __init__(self, parent, on_remove, on_pegar, page_bg=CARD_BG, on_tipo_change=None, on_fin_change=None):
+    def __init__(self, parent, on_remove, on_pegar, page_bg=CARD_BG, on_tipo_change=None, on_fin_change=None,
+                 on_change=None):
         self.page_bg = page_bg
+        self.on_change = on_change
         self.expanded = True
         self.enviado = False
         self.frame = tk.Frame(parent, bg=page_bg)
@@ -572,6 +574,10 @@ class ActivityRow:
         if on_fin_change:
             self.fin.bind("<<ComboboxSelected>>", lambda e: on_fin_change(self.fin.get()))
         self.detalle.bind("<KeyRelease>", self._on_detalle_key)
+        if self.on_change:
+            for widget in (self.inicio, self.fin, self.tipo, self.accion):
+                widget.bind("<<ComboboxSelected>>", lambda e: self.on_change(), add="+")
+            self.detalle.bind("<KeyRelease>", lambda e: self.on_change(), add="+")
 
         r3 = tk.Frame(self.body, bg=page_bg)
         r3.pack(fill="x", pady=(4, 8))
@@ -761,6 +767,9 @@ class BitacoraApp:
         RoundedButton(actions, "Guardar día", command=self.guardar_dia,
                       bg=ACCENT, fg="white", hover=ACCENT_PRESSED,
                       width=160, height=40, radius=20, page_bg=BG).pack(side="left")
+        self.autoguardado_var = tk.StringVar(value="")
+        tk.Label(actions, textvariable=self.autoguardado_var, font=F_CAPTION, bg=BG, fg=TEXT_SECONDARY)\
+            .pack(side="left", padx=(12, 0))
 
         self.status_var = tk.StringVar(value="")
         tk.Label(content, textvariable=self.status_var, font=F_LABEL, bg=BG, fg=SUCCESS,
@@ -779,6 +788,8 @@ class BitacoraApp:
         self._notificaciones_pausadas_fecha = None
         self._tocar_heartbeat()
         self._actualizar_reloj()
+        self._autoguardado_job = None
+        self.root.after(30000, self._tick_autoguardado)
         self.root.after(60000, self._verificar_recordatorio)
         threading.Thread(target=_asegurar_tarea_programada, daemon=True).start()
         threading.Thread(target=self._revisar_actualizaciones, daemon=True).start()
@@ -1159,7 +1170,8 @@ class BitacoraApp:
                 if fila.expanded:
                     fila.toggle()
         row = ActivityRow(self.rows_frame, self.quitar_fila, self.pegar_en_erp,
-                           on_tipo_change=self.on_tipo_change, on_fin_change=self.on_fin_change)
+                           on_tipo_change=self.on_tipo_change, on_fin_change=self.on_fin_change,
+                           on_change=self._programar_autoguardado)
         row.pack()
         if data:
             row.set(data)
@@ -1189,6 +1201,7 @@ class BitacoraApp:
         row.destroy()
         self.rows.remove(row)
         self._actualizar_ultima_hora_en_vivo()
+        self._programar_autoguardado()
 
     def limpiar_filas(self):
         for row in self.rows:
@@ -1196,12 +1209,14 @@ class BitacoraApp:
         self.rows = []
 
     def dia_nuevo(self):
+        self._cancelar_autoguardado_pendiente()
         self.fecha_var.set(date.today().isoformat())
         self.limpiar_filas()
         self.agregar_fila()
         self.status_var.set("")
 
     def cargar_dia(self, fecha=None):
+        self._cancelar_autoguardado_pendiente()
         fecha = fecha or self.historial_combo.get()
         if not fecha:
             messagebox.showinfo("Bitácora", "No hay días guardados para cargar.")
@@ -1568,6 +1583,34 @@ class BitacoraApp:
     def guardar_config(self):
         self.config["cedula"] = self.cedula_var.get().strip()
         save_json(CONFIG_FILE, self.config)
+
+    def _cancelar_autoguardado_pendiente(self):
+        job = getattr(self, "_autoguardado_job", None)
+        if job:
+            self.root.after_cancel(job)
+        self._autoguardado_job = None
+
+    def _programar_autoguardado(self):
+        self._cancelar_autoguardado_pendiente()
+        self._autoguardado_job = self.root.after(2000, self._autoguardar_silencioso)
+
+    def _tick_autoguardado(self):
+        self.root.after(30000, self._tick_autoguardado)
+        self._autoguardar_silencioso()
+
+    def _autoguardar_silencioso(self):
+        self._autoguardado_job = None
+        fecha = self.fecha_var.get().strip()
+        if not fecha:
+            return
+        actividades = self.recolectar_actividades()
+        if not actividades:
+            return
+        if self.data.get(fecha, {}).get("activities") == actividades:
+            return
+        self.data[fecha] = {"activities": actividades}
+        save_json(DATA_FILE, self.data)
+        self.autoguardado_var.set(f"Autoguardado {datetime.now().strftime('%H:%M:%S')}")
 
     def guardar_dia(self):
         fecha = self.fecha_var.get().strip()
