@@ -1,0 +1,17 @@
+# Datos personales / locales (no deben subirse)
+bitacoras_data.json
+bitacora_config.json
+notif_state.json
+notif_state.json.bak
+app_heartbeat.txt
+err.log
+
+# Salidas y builds
+__pycache__/
+*.pyc
+share_src/build/
+share_src/dist/
+BitacoraDiaria/
+ParaCompartir/
+BitacoraDiaria.zip
+Reportes/
