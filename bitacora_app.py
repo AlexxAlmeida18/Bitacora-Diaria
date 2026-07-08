@@ -197,6 +197,7 @@ ACCENT_LIGHT = "#E8F1FF"
 DANGER = "#FF3B30"
 DANGER_LIGHT = "#FFEBEA"
 SUCCESS = "#34C759"
+WARNING = "#FF9500"
 
 F_TITLE = ("Segoe UI Semibold", 22)
 F_SUBTITLE = ("Segoe UI", 11)
@@ -717,7 +718,12 @@ class BitacoraApp:
 
         header_izq = tk.Frame(header_top, bg=BG)
         header_izq.pack(side="left", fill="both", expand=True)
-        tk.Label(header_izq, text="Bitácora diaria", font=F_TITLE, bg=BG, fg=TEXT_PRIMARY).pack(anchor="w")
+        titulo_fila = tk.Frame(header_izq, bg=BG)
+        titulo_fila.pack(fill="x", anchor="w")
+        tk.Label(titulo_fila, text="Bitácora diaria", font=F_TITLE, bg=BG, fg=TEXT_PRIMARY).pack(side="left")
+        self.reloj_var = tk.StringVar(value="")
+        tk.Label(titulo_fila, textvariable=self.reloj_var, font=("Segoe UI Semibold", 16),
+                 bg=BG, fg=ACCENT).pack(side="left", padx=(16, 0))
         tk.Label(header_izq, text="Datadiscol · registra tu día y envíalo al ERP", font=F_SUBTITLE,
                  bg=BG, fg=TEXT_SECONDARY).pack(anchor="w")
         stats = tk.Frame(header_izq, bg=BG)
@@ -772,6 +778,7 @@ class BitacoraApp:
         self._recordatorio_umbral = 0
         self._notificaciones_pausadas_fecha = None
         self._tocar_heartbeat()
+        self._actualizar_reloj()
         self.root.after(60000, self._verificar_recordatorio)
         threading.Thread(target=_asegurar_tarea_programada, daemon=True).start()
         threading.Thread(target=self._revisar_actualizaciones, daemon=True).start()
@@ -823,18 +830,31 @@ class BitacoraApp:
         (self.actividad_canvas, self.actividad_estado_var,
          self.actividad_estado_label, self.actividad_detalle_var) = _fila_barra("Actividad de hoy")
 
-    def _dibujar_barra(self, canvas, ratio):
+    def _dibujar_barra(self, canvas, ratio, color=None):
         canvas.delete("all")
         w = int(str(canvas["width"]))
         h = int(str(canvas["height"]))
         radio = h // 2
         canvas.create_polygon(round_rect_points(1, 1, w - 1, h - 1, radio),
                                smooth=True, fill=BORDER, outline=BORDER)
-        color = SUCCESS if ratio >= 1.0 else DANGER
+        if color is None:
+            color = SUCCESS if ratio >= 1.0 else DANGER
         fill_w = min(w - 2, max(0, w * min(ratio, 1.0)))
         if fill_w > h:
             canvas.create_polygon(round_rect_points(1, 1, 1 + fill_w, h - 1, radio),
                                    smooth=True, fill=color, outline=color)
+
+    def _actualizar_reloj(self):
+        self.reloj_var.set(datetime.now().strftime("%H:%M:%S"))
+        self.root.after(1000, self._actualizar_reloj)
+
+    @staticmethod
+    def _nivel_3(ratio, umbral_regular=0.9, umbral_excelente=1.0):
+        if ratio >= umbral_excelente:
+            return "Excelente", SUCCESS
+        if ratio >= umbral_regular:
+            return "Regular", WARNING
+        return "Mal", DANGER
 
     def actualizar_cumplimiento_mensual(self):
         hoy = date.today()
@@ -862,11 +882,11 @@ class BitacoraApp:
         )
 
         self.cumplimiento_detalle_var.set(f"{horas_registradas:.1f}h / {horas_esperadas_hoy:.1f}h")
-        bien = horas_registradas + 1e-9 >= horas_esperadas_hoy
-        self.cumplimiento_estado_var.set("Bien" if bien else "Mal")
-        self.cumplimiento_estado_label.config(fg=SUCCESS if bien else DANGER)
+        nivel, color = self._nivel_3(self._cumplimiento_ratio)
+        self.cumplimiento_estado_var.set(nivel)
+        self.cumplimiento_estado_label.config(fg=color)
 
-        self._dibujar_barra(self.cumplimiento_canvas, self._cumplimiento_ratio)
+        self._dibujar_barra(self.cumplimiento_canvas, self._cumplimiento_ratio, color)
 
     def actualizar_actividad_hoy(self):
         ahora = datetime.now()
@@ -881,14 +901,19 @@ class BitacoraApp:
         ratio = cubierto / transcurrido
 
         gap = ahora_min - ultima_fin_min
-        bien = gap < 60
+        if gap < 30:
+            nivel, color = "Excelente", SUCCESS
+        elif gap < 60:
+            nivel, color = "Regular", WARNING
+        else:
+            nivel, color = "Mal", DANGER
 
-        self._actividad_ratio = 1.0 if bien else ratio
-        self.actividad_estado_var.set("Bien" if bien else "Mal")
-        self.actividad_estado_label.config(fg=SUCCESS if bien else DANGER)
+        self._actividad_ratio = 1.0 if gap < 60 else ratio
+        self.actividad_estado_var.set(nivel)
+        self.actividad_estado_label.config(fg=color)
         self.actividad_detalle_var.set(f"Última hora: {ultima_fin}" if ultima_fin else "Sin actividades hoy")
 
-        self._dibujar_barra(self.actividad_canvas, self._actividad_ratio)
+        self._dibujar_barra(self.actividad_canvas, self._actividad_ratio, color)
 
     def _build_datos_card(self, parent):
         parent.configure(padx=20, pady=18)
