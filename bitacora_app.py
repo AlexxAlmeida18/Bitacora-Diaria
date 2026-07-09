@@ -1,9 +1,11 @@
 import json
 import os
+import re
 import subprocess
 import sys
 import tempfile
 import threading
+import unicodedata
 import urllib.request
 import zipfile
 from datetime import date, datetime, timedelta
@@ -123,7 +125,8 @@ ACCION_KEYWORDS = [
         "digitalización", "digitalización compras", "digitalización ventas", "digitalización contabilidad",
         "digitalización finanzas", "digitalización logística", "digitalización producción", "digitalización recursos humanos",
         "digitalización jurídica", "digitalización tecnología", "digitalización calidad", "digitalización sst",
-        "digitalización gerencia",
+        "digitalización gerencia", "digitalizar", "digitalicé", "digitalice",
+        "escanear", "escaneo", "convertir a pdf", "pasar a pdf",
     )),
     ("Tabular", (
         "tabul", "hoja de calculo", "hoja de cálculo", "en excel",
@@ -199,7 +202,10 @@ ACCION_KEYWORDS = [
         "comité gerencia", "formación", "formación compras", "formación ventas",
         "formación contabilidad", "formación finanzas", "formación logística", "formación producción",
         "formación recursos humanos", "formación jurídica", "formación tecnología", "formación calidad",
-        "formación sst", "formación gerencia",
+        "formación sst", "formación gerencia", "charla", "charla informativa",
+        "conversatorio", "webinar", "taller", "sesión de trabajo",
+        "sesion de trabajo", "encuentro con", "punto de control", "daily",
+        "standup", "sync con",
     )),
     ("Redactar", (
         "redact", "document", "elabora", "escrib",
@@ -614,6 +620,7 @@ ACCION_KEYWORDS = [
         "solicitud compras", "solicitud ventas", "solicitud contabilidad", "solicitud finanzas",
         "solicitud logística", "solicitud producción", "solicitud recursos humanos", "solicitud jurídica",
         "solicitud tecnología", "solicitud calidad", "solicitud sst", "solicitud gerencia",
+        "soporte remoto", "asistencia remota", "mesa de ayuda", "help desk",
     )),
     ("Extraer", (
         "extrac", "extraer", "extraj", "descarg",
@@ -706,7 +713,9 @@ ACCION_KEYWORDS = [
         "programación", "programación compras", "programación ventas", "programación contabilidad",
         "programación finanzas", "programación logística", "programación producción", "programación recursos humanos",
         "programación jurídica", "programación tecnología", "programación calidad", "programación sst",
-        "programación gerencia",
+        "programación gerencia", "automaticé", "automatice", "robotizar",
+        "rpa", "bot de", "proceso automatico", "proceso automático",
+        "flujo automatizado",
     )),
     ("Estructurar", (
         "estructur", "armar formato", "definir estructura", "defin",
@@ -755,12 +764,68 @@ ACCION_KEYWORDS = [
 ]
 
 
+def _sin_tildes(texto):
+    return "".join(
+        c for c in unicodedata.normalize("NFKD", texto)
+        if not unicodedata.combining(c)
+    )
+
+
+# Palabras cortas donde la tilde depende del significado (el/él, si/sí, mas/más,
+# tu/tú, esta/está, como/cómo...): a proposito NO se corrigen solas porque
+# adivinar mal es peor que dejarlas como las escribio la persona.
+_DICCIONARIO_TILDES = {
+    "area": "área", "numero": "número", "codigo": "código", "segun": "según",
+    "analisis": "análisis", "tecnico": "técnico", "tecnica": "técnica",
+    "economico": "económico", "economica": "económica", "juridico": "jurídico",
+    "juridica": "jurídica", "logistica": "logística", "politica": "política",
+    "estrategico": "estratégico", "estrategica": "estratégica", "unico": "único",
+    "unica": "única", "proximo": "próximo", "proxima": "próxima",
+    "especifico": "específico", "especifica": "específica", "basico": "básico",
+    "basica": "básica", "publico": "público", "publica": "pública",
+    "auditoria": "auditoría", "garantia": "garantía", "categoria": "categoría",
+    "tesoreria": "tesorería", "modulo": "módulo", "titulo": "título",
+    "simbolo": "símbolo", "facil": "fácil", "dificil": "difícil", "util": "útil",
+    "nomina": "nómina", "telefono": "teléfono", "maximo": "máximo",
+    "minimo": "mínimo", "rapido": "rápido", "articulo": "artículo",
+    "kilometro": "kilómetro",
+}
+
+_RE_ION = re.compile(r"\b(\w+)ion\b")
+
+
+def _corregir_tildes_detalle(texto):
+    """Arregla tildes faltantes en patrones sin ambiguedad (ej. 'gestion' ->
+    'gestión'), pensado para el texto que se pega en el ERP. No toca palabras
+    cortas ambiguas ni lo que la persona guardo localmente."""
+    texto = _RE_ION.sub(lambda m: m.group(1) + "ión", texto)
+    palabras = texto.split(" ")
+    for i, palabra in enumerate(palabras):
+        limpia = palabra.strip(".,;:()")
+        reemplazo = _DICCIONARIO_TILDES.get(limpia.lower())
+        if reemplazo is None:
+            continue
+        if limpia[0].isupper():
+            reemplazo = reemplazo[0].upper() + reemplazo[1:]
+        palabras[i] = palabra.replace(limpia, reemplazo, 1)
+    return " ".join(palabras)
+
+
+# Precalculado una sola vez (no en cada tecla presionada): asi 'gestion', 'gestión'
+# y 'gestion' escrito sin enie tambien coinciden, sin tener que mantener a mano
+# cada palabra clave duplicada con y sin tilde.
+ACCION_KEYWORDS_SIN_TILDES = [
+    (accion, tuple(_sin_tildes(kw) for kw in keywords))
+    for accion, keywords in ACCION_KEYWORDS
+]
+
+
 def sugerir_accion(texto):
-    texto = texto.lower()
+    texto = _sin_tildes(texto.lower())
     mejor_accion = None
     mejor_pos = None
     mejor_len = 0
-    for accion, keywords in ACCION_KEYWORDS:
+    for accion, keywords in ACCION_KEYWORDS_SIN_TILDES:
         for kw in keywords:
             pos = texto.find(kw)
             if pos == -1:
@@ -1107,7 +1172,7 @@ def fill_erp_form(driver, cedula, tipo, accion, detalle, inicio, fin):
     except TimeoutException:
         pass
 
-    set_text("input_58_6", detalle)
+    set_text("input_58_6", _corregir_tildes_detalle(detalle))
 
     if tipo in TIPO_ACTIVIDAD_OPTIONS:
         idx = TIPO_ACTIVIDAD_OPTIONS.index(tipo)
