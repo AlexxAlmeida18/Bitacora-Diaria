@@ -404,23 +404,31 @@ class RoundedButton(tk.Canvas):
         self.w = width
         self.h = height
         self.radius = radius if radius is not None else height // 2
+        self.enabled = True
         self._paint(self.bg_color)
-        self.bind("<Button-1>", lambda e: self.command() if self.command else None)
-        self.bind("<Enter>", lambda e: self._paint(self.hover_color))
-        self.bind("<Leave>", lambda e: self._paint(self.bg_color))
+        self.bind("<Button-1>", lambda e: self.command() if self.command and self.enabled else None)
+        self.bind("<Enter>", lambda e: self._paint(self.hover_color) if self.enabled else None)
+        self.bind("<Leave>", lambda e: self._paint(self.bg_color) if self.enabled else None)
         self.configure(cursor="hand2")
 
-    def _paint(self, color):
+    def _paint(self, color, fg=None):
         self.delete("all")
         self.create_polygon(
             round_rect_points(1, 1, self.w - 1, self.h - 1, self.radius),
             smooth=True, fill=color, outline=color,
         )
-        self.create_text(self.w / 2, self.h / 2, text=self.text, fill=self.fg, font=self.font)
+        self.create_text(self.w / 2, self.h / 2, text=self.text, fill=fg or self.fg, font=self.font)
 
     def set_text(self, text):
         self.text = text
-        self._paint(self.bg_color)
+        self._paint(self.bg_color if self.enabled else "#E3E6EA", fg=self.fg if self.enabled else "#9AA3AD")
+
+    def set_enabled(self, enabled):
+        if self.enabled == enabled:
+            return
+        self.enabled = enabled
+        self.configure(cursor="hand2" if enabled else "arrow")
+        self._paint(self.bg_color if enabled else "#E3E6EA", fg=self.fg if enabled else "#9AA3AD")
 
 
 CHROMIUM_FAST_ARGS = [
@@ -685,6 +693,8 @@ class BitacoraApp:
         self.driver = None
         self.driver_nombre = None
         self.driver_lock = threading.Lock()
+        self.pegando_en_erp = False
+        self.pegando_overlay = None
 
         self._setup_style()
 
@@ -1513,6 +1523,8 @@ class BitacoraApp:
         self.status_var.set(f"Día {fecha} guardado en {DATA_FILE}")
 
     def pegar_en_erp(self, row):
+        if self.pegando_en_erp:
+            return  # ya hay una actividad pegandose; los botones estan deshabilitados mientras tanto
         self.guardar_config()
         cedula = self.cedula_var.get().strip()
         if not cedula:
@@ -1523,8 +1535,48 @@ class BitacoraApp:
             messagebox.showwarning("Bitácora", "Escribe el Detalle de la actividad antes de pegarla en el ERP.")
             return
 
+        self.pegando_en_erp = True
+        self._set_pegar_botones_habilitados(False)
         self.status_var.set("Abriendo el ERP y llenando el formulario…")
+        self._mostrar_pegando_overlay("Pegando en el ERP…\nNo cierres esta ventana.")
         threading.Thread(target=self._pegar_en_erp_worker, args=(cedula, datos, row), daemon=True).start()
+
+    def _set_pegar_botones_habilitados(self, habilitado):
+        for row in self.rows:
+            row.pegar_btn.set_enabled(habilitado)
+
+    def _mostrar_pegando_overlay(self, mensaje):
+        self._ocultar_pegando_overlay()
+        overlay = tk.Toplevel(self.root)
+        overlay.withdraw()
+        overlay.overrideredirect(True)
+        overlay.attributes("-topmost", True)
+        overlay.configure(bg=ACCENT)
+        frame = tk.Frame(overlay, bg=ACCENT, padx=32, pady=20)
+        frame.pack()
+        tk.Label(frame, text=mensaje, bg=ACCENT, fg="white", font=F_BUTTON,
+                 wraplength=320, justify="center").pack()
+        overlay.update_idletasks()
+        self.root.update_idletasks()
+        ancho, alto = overlay.winfo_reqwidth(), overlay.winfo_reqheight()
+        x = self.root.winfo_rootx() + (self.root.winfo_width() - ancho) // 2
+        y = self.root.winfo_rooty() + (self.root.winfo_height() - alto) // 2
+        overlay.geometry(f"{ancho}x{alto}+{max(x, 0)}+{max(y, 0)}")
+        overlay.deiconify()
+        self.pegando_overlay = overlay
+
+    def _ocultar_pegando_overlay(self):
+        if self.pegando_overlay is not None:
+            try:
+                self.pegando_overlay.destroy()
+            except Exception:
+                pass
+            self.pegando_overlay = None
+
+    def _terminar_pegar_en_erp(self):
+        self.pegando_en_erp = False
+        self._set_pegar_botones_habilitados(True)
+        self._ocultar_pegando_overlay()
 
     def _pegar_en_erp_worker(self, cedula, datos, row):
         try:
@@ -1553,6 +1605,8 @@ class BitacoraApp:
             self.root.after(0, lambda: messagebox.showerror(
                 "Bitácora", f"No se pudo llenar el formulario en el ERP:\n{msg}"))
             self.root.after(0, lambda: self.status_var.set(""))
+        finally:
+            self.root.after(0, self._terminar_pegar_en_erp)
 
 
 if __name__ == "__main__":
