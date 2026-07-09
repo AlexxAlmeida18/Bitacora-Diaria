@@ -245,7 +245,7 @@ def save_json(path, data):
         json.dump(data, f, ensure_ascii=False, indent=2)
 
 
-APP_VERSION = "1.5.4"
+APP_VERSION = "1.5.5"
 UPDATE_REPO = "AlexxAlmeida18/Bitacora-Diaria"
 
 NOTIF_TASK_NAME = "BitacoraDiaria Recordatorios"
