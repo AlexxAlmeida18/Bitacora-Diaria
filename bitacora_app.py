@@ -694,7 +694,7 @@ class BitacoraApp:
         self.driver_nombre = None
         self.driver_lock = threading.Lock()
         self.pegando_en_erp = False
-        self.pegando_overlay = None
+        self.overlay = None
 
         self._setup_style()
 
@@ -996,6 +996,7 @@ class BitacoraApp:
                 "¿Actualizar y reiniciar la app ahora?"):
             return
         self.status_var.set("Descargando actualización…")
+        self._mostrar_overlay("Descargando actualización…\nLa app se va a reiniciar sola.")
         threading.Thread(target=self._descargar_e_instalar, args=(zip_url,), daemon=True).start()
 
     def _descargar_e_instalar(self, zip_url):
@@ -1032,6 +1033,7 @@ class BitacoraApp:
             self.root.after(0, self.root.destroy)
         except Exception as exc:
             msg = str(exc)
+            self.root.after(0, self._ocultar_overlay)
             self.root.after(0, lambda: messagebox.showerror("Bitácora", f"No se pudo actualizar:\n{msg}"))
             self.root.after(0, lambda: self.status_var.set(""))
 
@@ -1538,15 +1540,15 @@ class BitacoraApp:
         self.pegando_en_erp = True
         self._set_pegar_botones_habilitados(False)
         self.status_var.set("Abriendo el ERP y llenando el formulario…")
-        self._mostrar_pegando_overlay("Pegando en el ERP…\nNo cierres esta ventana.")
+        self._mostrar_overlay("Pegando en el ERP…\nNo cierres esta ventana.")
         threading.Thread(target=self._pegar_en_erp_worker, args=(cedula, datos, row), daemon=True).start()
 
     def _set_pegar_botones_habilitados(self, habilitado):
         for row in self.rows:
             row.pegar_btn.set_enabled(habilitado)
 
-    def _mostrar_pegando_overlay(self, mensaje):
-        self._ocultar_pegando_overlay()
+    def _mostrar_overlay(self, mensaje):
+        self._ocultar_overlay()
         overlay = tk.Toplevel(self.root)
         overlay.withdraw()
         overlay.overrideredirect(True)
@@ -1563,20 +1565,20 @@ class BitacoraApp:
         y = self.root.winfo_rooty() + (self.root.winfo_height() - alto) // 2
         overlay.geometry(f"{ancho}x{alto}+{max(x, 0)}+{max(y, 0)}")
         overlay.deiconify()
-        self.pegando_overlay = overlay
+        self.overlay = overlay
 
-    def _ocultar_pegando_overlay(self):
-        if self.pegando_overlay is not None:
+    def _ocultar_overlay(self):
+        if self.overlay is not None:
             try:
-                self.pegando_overlay.destroy()
+                self.overlay.destroy()
             except Exception:
                 pass
-            self.pegando_overlay = None
+            self.overlay = None
 
     def _terminar_pegar_en_erp(self):
         self.pegando_en_erp = False
         self._set_pegar_botones_habilitados(True)
-        self._ocultar_pegando_overlay()
+        self._ocultar_overlay()
 
     def _pegar_en_erp_worker(self, cedula, datos, row):
         try:
