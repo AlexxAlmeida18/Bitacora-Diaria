@@ -9,9 +9,12 @@ err.log
 # Salidas y builds
 __pycache__/
 *.pyc
+build/
+dist/
 share_src/build/
 share_src/dist/
 BitacoraDiaria/
 ParaCompartir/
 BitacoraDiaria.zip
+BitacoraDiaria_v*.zip
 Reportes/

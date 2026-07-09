@@ -1,7 +1,12 @@
 # -*- mode: python ; coding: utf-8 -*-
+import os
 from PyInstaller.utils.hooks import collect_all
 
-datas = [('bitacora.ico', '.')]
+# Fuente unica: la raiz del repo (un nivel arriba de este .spec), asi no hay
+# copias de bitacora_app.py/bitacora.ico que se puedan desincronizar.
+ROOT = os.path.abspath(os.path.join(SPECPATH, '..'))
+
+datas = [(os.path.join(ROOT, 'bitacora.ico'), '.')]
 binaries = []
 hiddenimports = []
 tmp_ret = collect_all('selenium')
@@ -11,7 +16,7 @@ datas += tmp_ret[0]; binaries += tmp_ret[1]; hiddenimports += tmp_ret[2]
 
 
 a = Analysis(
-    ['bitacora_app.py'],
+    [os.path.join(ROOT, 'bitacora_app.py')],
     pathex=[],
     binaries=binaries,
     datas=datas,
@@ -41,7 +46,7 @@ exe = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
-    icon=['bitacora.ico'],
+    icon=[os.path.join(ROOT, 'bitacora.ico')],
 )
 coll = COLLECT(
     exe,
