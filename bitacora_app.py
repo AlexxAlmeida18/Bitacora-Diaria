@@ -1149,7 +1149,15 @@ def fill_erp_form(driver, cedula, tipo, accion, detalle, inicio, fin):
         el = driver.find_element(By.ID, elem_id)
         el.clear()
         if value:
-            el.send_keys(value)
+            # send_keys simula tecleo real y puede descartar tildes/eñes que no
+            # tienen una tecla directa en el layout US (bug conocido de
+            # ChromeDriver). Escribir el value por JS evita esa perdida.
+            driver.execute_script(
+                "arguments[0].value = arguments[1];"
+                "arguments[0].dispatchEvent(new Event('input', {bubbles: true}));"
+                "arguments[0].dispatchEvent(new Event('change', {bubbles: true}));",
+                el, value,
+            )
 
     cedula_el = driver.find_element(By.ID, "input_58_1")
     cedula_el.clear()
@@ -1673,19 +1681,24 @@ class BitacoraApp:
             if not os.path.isdir(origen):
                 raise RuntimeError("El paquete de actualización no tiene el formato esperado.")
 
-            bat_path = os.path.join(tmp_dir, "actualizar.bat")
+            # Las rutas van como argumentos de proceso (nunca como texto embebido
+            # en el script), asi Windows las pasa en Unicode exacto y no dependen
+            # de que cmd.exe adivine el codepage del archivo: eso es lo que rompia
+            # nombres de usuario con enie/tildes (ej. "dmuñoz" -> "dmuÃ±oz") pese
+            # al chcp 65001 anterior, que no es confiable en toda consola/Windows.
+            ps1_path = os.path.join(tmp_dir, "actualizar.ps1")
             exe_path = os.path.join(APP_DIR, "BitacoraDiaria.exe")
-            with open(bat_path, "w", encoding="utf-8") as f:
+            with open(ps1_path, "w", encoding="utf-8") as f:
                 f.write(
-                    "@echo off\r\n"
-                    "chcp 65001 > NUL\r\n"
-                    "timeout /t 3 /nobreak > NUL\r\n"
-                    f'robocopy "{origen}" "{APP_DIR}" /E /R:5 /W:1 > NUL\r\n'
-                    f'start "" "{exe_path}"\r\n'
-                    f'rmdir /s /q "{tmp_dir}"\r\n'
+                    "param($origen, $destino, $exe, $tmp)\r\n"
+                    "Start-Sleep -Seconds 3\r\n"
+                    "robocopy $origen $destino /E /R:5 /W:1 | Out-Null\r\n"
+                    "Start-Process -FilePath $exe\r\n"
+                    "Remove-Item -Recurse -Force $tmp\r\n"
                 )
             subprocess.Popen(
-                ["cmd.exe", "/c", bat_path],
+                ["powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", ps1_path,
+                 origen, APP_DIR, exe_path, tmp_dir],
                 creationflags=subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP,
                 close_fds=True,
             )
