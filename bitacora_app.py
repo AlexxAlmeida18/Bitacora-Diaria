@@ -1,3 +1,4 @@
+import calendar
 import json
 import os
 import re
@@ -834,13 +835,15 @@ def sugerir_accion(texto):
                 mejor_accion, mejor_pos, mejor_len = accion, pos, len(kw)
     return mejor_accion
 
-BG = "#F2F2F7"
+# Paleta plana y fria: la organizacion visual viene de bordes finos consistentes
+# y espaciado generoso entre tarjetas, no de simular relieve/sombra.
+BG = "#E9EDF5"
 CARD_BG = "#FFFFFF"
-ROW_BG = "#FAFAFA"
-BORDER = "#E5E5EA"
+ROW_BG = "#F5F7FB"
+BORDER = "#E1E6EF"
 TEXT_PRIMARY = "#1C1C1E"
 TEXT_SECONDARY = "#8E8E93"
-ACCENT = "#007AFF"
+ACCENT = "#0A84FF"
 ACCENT_PRESSED = "#0060DF"
 ACCENT_LIGHT = "#E8F1FF"
 DANGER = "#FF3B30"
@@ -848,14 +851,16 @@ DANGER_LIGHT = "#FFEBEA"
 SUCCESS = "#34C759"
 WARNING = "#FF9500"
 
-F_TITLE = ("Segoe UI Semibold", 22)
-F_SUBTITLE = ("Segoe UI", 11)
-F_LABEL = ("Segoe UI", 10)
-F_CAPTION = ("Segoe UI", 8)
-F_LABEL_BOLD = ("Segoe UI Semibold", 10)
-F_BUTTON = ("Segoe UI Semibold", 10)
-F_STAT_BIG = ("Segoe UI Semibold", 30)
-F_STAT_LABEL = ("Segoe UI Semibold", 13)
+F_FAMILY_DISPLAY = "Segoe UI Variable Display"
+F_FAMILY_TEXT = "Segoe UI Variable Text"
+F_TITLE = (F_FAMILY_DISPLAY, 24, "bold")
+F_SUBTITLE = (F_FAMILY_TEXT, 11)
+F_LABEL = (F_FAMILY_TEXT, 10)
+F_CAPTION = (F_FAMILY_TEXT, 8)
+F_LABEL_BOLD = (F_FAMILY_TEXT, 10, "bold")
+F_BUTTON = (F_FAMILY_TEXT, 10, "bold")
+F_STAT_BIG = (F_FAMILY_DISPLAY, 30, "bold")
+F_STAT_LABEL = (F_FAMILY_DISPLAY, 13, "bold")
 
 
 def load_json(path, default):
@@ -1015,6 +1020,33 @@ def revisar_recordatorio_en_segundo_plano():
     save_json(NOTIF_STATE_FILE, estado)
 
 
+def _aplicar_vidrio_windows11(root):
+    """Esquinas redondeadas + fondo Mica de Windows 11 para la ventana principal.
+    Es puramente cosmetico: en Windows 10 u otras versiones sin soporte, las
+    llamadas fallan y simplemente no se aplica nada, sin romper la app."""
+    if sys.platform != "win32":
+        return
+    try:
+        import ctypes
+        root.update_idletasks()
+        hwnd = ctypes.windll.user32.GetParent(root.winfo_id())
+        dwmapi = ctypes.windll.dwmapi
+        DWMWA_WINDOW_CORNER_PREFERENCE = 33
+        DWMWCP_ROUND = 2
+        dwmapi.DwmSetWindowAttribute(
+            hwnd, DWMWA_WINDOW_CORNER_PREFERENCE,
+            ctypes.byref(ctypes.c_int(DWMWCP_ROUND)), ctypes.sizeof(ctypes.c_int),
+        )
+        DWMWA_SYSTEMBACKDROP_TYPE = 38
+        DWMSBT_MAINWINDOW = 2  # Mica
+        dwmapi.DwmSetWindowAttribute(
+            hwnd, DWMWA_SYSTEMBACKDROP_TYPE,
+            ctypes.byref(ctypes.c_int(DWMSBT_MAINWINDOW)), ctypes.sizeof(ctypes.c_int),
+        )
+    except Exception:
+        pass
+
+
 def round_rect_points(x1, y1, x2, y2, radius):
     return [
         x1 + radius, y1, x2 - radius, y1, x2, y1, x2, y1 + radius,
@@ -1024,7 +1056,12 @@ def round_rect_points(x1, y1, x2, y2, radius):
 
 
 class RoundedCard(tk.Frame):
-    def __init__(self, parent, page_bg=BG, fill=CARD_BG, radius=16, **kwargs):
+    """Tarjeta plana con esquinas redondeadas y un borde fino. Nada de sombras
+    falsas: en Tkinter, sin desenfoque real, se ven como una mancha sucia en
+    vez de profundidad. La organizacion visual viene de agrupar contenido en
+    estas tarjetas con bordes y espaciado consistentes, no de simular relieve."""
+
+    def __init__(self, parent, page_bg=BG, fill=CARD_BG, radius=18, **kwargs):
         super().__init__(parent, bg=page_bg, highlightthickness=0, **kwargs)
         self.fill = fill
         self.radius = radius
@@ -1207,12 +1244,12 @@ class ActivityRow:
 
         header = tk.Frame(self.frame, bg=page_bg)
         header.pack(fill="x", pady=(8, 0))
-        self.toggle_btn = tk.Label(header, text="▾", font=("Segoe UI", 12), bg=page_bg,
+        self.toggle_btn = tk.Label(header, text="▾", font=(F_FAMILY_TEXT, 12), bg=page_bg,
                                     fg=TEXT_SECONDARY, cursor="hand2", width=2)
         self.toggle_btn.pack(side="left")
         self.toggle_btn.bind("<Button-1>", lambda e: self.toggle())
         self.badge_var = tk.StringVar(value="")
-        tk.Label(header, textvariable=self.badge_var, font=("Segoe UI Semibold", 8),
+        tk.Label(header, textvariable=self.badge_var, font=(F_FAMILY_TEXT, 8, "bold"),
                  bg=page_bg, fg=SUCCESS).pack(side="left", padx=(0, 6))
         self.resumen_var = tk.StringVar(value="")
         self.resumen_label = tk.Label(header, textvariable=self.resumen_var, font=F_LABEL,
@@ -1352,6 +1389,7 @@ class BitacoraApp:
         pos_y = max(0, (screen_h - win_h) // 2)
         self.root.geometry(f"{win_w}x{win_h}+{pos_x}+{pos_y}")
         self.root.minsize(520, 400)
+        _aplicar_vidrio_windows11(self.root)
 
         self.data = load_json(DATA_FILE, {})
         self.config = load_json(CONFIG_FILE, {"cedula": ""})
@@ -1363,6 +1401,33 @@ class BitacoraApp:
         self.overlay = None
 
         self._setup_style()
+
+        # Barra de accion fija (no vive dentro del area con scroll): asi "Guardar
+        # dia" y el mensaje de estado siempre quedan a la vista, sin tener que
+        # bajar hasta el fondo del formulario.
+        footer = tk.Frame(root, bg=BG)
+        footer.pack(side="bottom", fill="x")
+
+        card_acciones = RoundedCard(footer, page_bg=BG)
+        card_acciones.pack(fill="x", padx=24, pady=(6, 10))
+        acciones_inner = card_acciones.inner
+        acciones_inner.configure(padx=20, pady=14)
+
+        actions = tk.Frame(acciones_inner, bg=CARD_BG)
+        actions.pack(fill="x")
+        RoundedButton(actions, "+  Agregar actividad", command=self.agregar_fila,
+                      bg=ACCENT_LIGHT, fg=ACCENT, hover="#D6E9FF",
+                      width=180, height=44, radius=22, page_bg=CARD_BG).pack(side="left", padx=(0, 10))
+        RoundedButton(actions, "✓  Guardar día", command=self.guardar_dia,
+                      bg=ACCENT, fg="white", hover=ACCENT_PRESSED,
+                      width=200, height=44, radius=22, page_bg=CARD_BG).pack(side="left")
+        self.autoguardado_var = tk.StringVar(value="")
+        tk.Label(actions, textvariable=self.autoguardado_var, font=F_CAPTION, bg=CARD_BG, fg=TEXT_SECONDARY)\
+            .pack(side="left", padx=(16, 0))
+
+        self.status_var = tk.StringVar(value="")
+        tk.Label(acciones_inner, textvariable=self.status_var, font=F_CAPTION, bg=CARD_BG, fg=SUCCESS,
+                 wraplength=700, justify="left").pack(anchor="w", pady=(6, 0))
 
         outer_canvas = tk.Canvas(root, bg=BG, borderwidth=0, highlightthickness=0)
         outer_scroll = ttk.Scrollbar(root, orient="vertical", command=outer_canvas.yview,
@@ -1389,28 +1454,33 @@ class BitacoraApp:
         self.root.bind_class("TCombobox", "<MouseWheel>", _combobox_wheel)
 
         header = tk.Frame(content, bg=BG)
-        header.pack(fill="x", padx=28, pady=(24, 12))
+        header.pack(fill="x", padx=28, pady=(12, 0))
 
-        header_top = tk.Frame(header, bg=BG)
-        header_top.pack(fill="x")
-
-        header_izq = tk.Frame(header_top, bg=BG)
-        header_izq.pack(side="left", fill="both", expand=True)
-        titulo_fila = tk.Frame(header_izq, bg=BG)
+        titulo_fila = tk.Frame(header, bg=BG)
         titulo_fila.pack(fill="x", anchor="w")
-        tk.Label(titulo_fila, text="Bitácora diaria", font=F_TITLE, bg=BG, fg=TEXT_PRIMARY).pack(side="left")
+        tk.Label(titulo_fila, text="Bitácora diaria", font=(F_FAMILY_DISPLAY, 18, "bold"),
+                 bg=BG, fg=TEXT_PRIMARY).pack(side="left")
         self.reloj_var = tk.StringVar(value="")
-        tk.Label(titulo_fila, textvariable=self.reloj_var, font=("Segoe UI Semibold", 16),
-                 bg=BG, fg=ACCENT).pack(side="left", padx=(16, 0))
-        tk.Label(header_izq, text="Datadiscol · registra tu día y envíalo al ERP", font=F_SUBTITLE,
+        tk.Label(titulo_fila, textvariable=self.reloj_var, font=(F_FAMILY_TEXT, 13, "bold"),
+                 bg=BG, fg=ACCENT).pack(side="left", padx=(12, 0))
+        tk.Label(header, text="Datadiscol · registra tu día y envíalo al ERP", font=F_CAPTION,
                  bg=BG, fg=TEXT_SECONDARY).pack(anchor="w")
-        stats = tk.Frame(header_izq, bg=BG)
-        stats.pack(fill="x", pady=(14, 0))
+
+        card_resumen = RoundedCard(content, page_bg=BG)
+        card_resumen.pack(fill="x", padx=24, pady=(8, 4))
+        resumen_inner = card_resumen.inner
+        resumen_inner.configure(padx=16, pady=8)
+
+        resumen_fila = tk.Frame(resumen_inner, bg=CARD_BG)
+        resumen_fila.pack(fill="x")
+
+        stats = tk.Frame(resumen_fila, bg=CARD_BG)
+        stats.pack(side="left", fill="both", expand=True)
 
         def _stat_tile(valor_var, caption, font_valor=F_STAT_LABEL, fg_valor=TEXT_PRIMARY):
-            tile = tk.Frame(stats, bg=BG)
-            tk.Label(tile, textvariable=valor_var, font=font_valor, bg=BG, fg=fg_valor).pack(anchor="w")
-            tk.Label(tile, text=caption, font=F_CAPTION, bg=BG, fg=TEXT_SECONDARY).pack(anchor="w")
+            tile = tk.Frame(stats, bg=CARD_BG)
+            tk.Label(tile, textvariable=valor_var, font=font_valor, bg=CARD_BG, fg=fg_valor).pack(anchor="w")
+            tk.Label(tile, text=caption, font=F_CAPTION, bg=CARD_BG, fg=TEXT_SECONDARY).pack(anchor="w")
             return tile
 
         self.total_actividades_var = tk.StringVar(value="0")
@@ -1418,34 +1488,32 @@ class BitacoraApp:
         self.ultima_hora_var = tk.StringVar(value="--:--")
 
         _stat_tile(self.total_actividades_var, "actividades registradas",
-                   font_valor=F_STAT_BIG, fg_valor=ACCENT).pack(side="left", padx=(0, 36))
-        _stat_tile(self.mes_actual_var, "mes actual").pack(side="left", padx=(0, 36))
+                   font_valor=(F_FAMILY_DISPLAY, 26, "bold"), fg_valor=ACCENT).pack(side="left", padx=(0, 22))
+        _stat_tile(self.mes_actual_var, "mes actual").pack(side="left", padx=(0, 22))
         _stat_tile(self.ultima_hora_var, "última hora registrada").pack(side="left")
 
-        header_der = tk.Frame(header_top, bg=BG)
-        header_der.pack(side="right", anchor="ne")
-        self._build_cumplimiento_compacto(header_der)
+        tk.Frame(resumen_fila, bg=BORDER, width=1).pack(side="left", fill="y", padx=16)
+
+        header_der = tk.Frame(resumen_fila, bg=CARD_BG)
+        header_der.pack(side="left")
+
+        horas_col = tk.Frame(header_der, bg=CARD_BG)
+        horas_col.pack(side="left")
+        self._build_cumplimiento_compacto(horas_col)
+
+        tk.Frame(header_der, bg=BORDER, width=1).pack(side="left", fill="y", padx=12)
+
+        calendario_col = tk.Frame(header_der, bg=CARD_BG)
+        calendario_col.pack(side="left")
+        self._build_calendario_mensual(calendario_col)
 
         card_datos = RoundedCard(content, page_bg=BG)
-        card_datos.pack(fill="x", padx=24, pady=8)
+        card_datos.pack(fill="x", padx=24, pady=6)
         self._build_datos_card(card_datos.inner)
 
         card_actividades = RoundedCard(content, page_bg=BG)
-        card_actividades.pack(fill="x", padx=24, pady=8)
+        card_actividades.pack(fill="x", padx=24, pady=6)
         self._build_actividades_card(card_actividades.inner)
-
-        actions = tk.Frame(content, bg=BG)
-        actions.pack(fill="x", padx=24, pady=(4, 8))
-        RoundedButton(actions, "Guardar día", command=self.guardar_dia,
-                      bg=ACCENT, fg="white", hover=ACCENT_PRESSED,
-                      width=160, height=40, radius=20, page_bg=BG).pack(side="left")
-        self.autoguardado_var = tk.StringVar(value="")
-        tk.Label(actions, textvariable=self.autoguardado_var, font=F_CAPTION, bg=BG, fg=TEXT_SECONDARY)\
-            .pack(side="left", padx=(12, 0))
-
-        self.status_var = tk.StringVar(value="")
-        tk.Label(content, textvariable=self.status_var, font=F_LABEL, bg=BG, fg=SUCCESS,
-                 wraplength=760, justify="left").pack(anchor="w", padx=28, pady=(0, 20))
 
         hoy = date.today().isoformat()
         if hoy in self.data:
@@ -1491,17 +1559,16 @@ class BitacoraApp:
         ancho_barra = 190
 
         def _fila_barra(titulo):
-            tk.Frame(parent, bg=BG, height=6).pack()
-            cab = tk.Frame(parent, bg=BG)
+            cab = tk.Frame(parent, bg=CARD_BG)
             cab.pack(fill="x")
-            tk.Label(cab, text=titulo, font=F_CAPTION, bg=BG, fg=TEXT_SECONDARY).pack(side="left")
+            tk.Label(cab, text=titulo, font=F_CAPTION, bg=CARD_BG, fg=TEXT_SECONDARY).pack(side="left")
             estado_var = tk.StringVar(value="")
-            estado_label = tk.Label(cab, textvariable=estado_var, font=("Segoe UI Semibold", 8), bg=BG)
+            estado_label = tk.Label(cab, textvariable=estado_var, font=(F_FAMILY_TEXT, 8, "bold"), bg=CARD_BG)
             estado_label.pack(side="right")
-            canvas = tk.Canvas(parent, width=ancho_barra, height=8, bg=BG, highlightthickness=0)
-            canvas.pack(anchor="e", pady=(2, 0))
+            canvas = tk.Canvas(parent, width=ancho_barra, height=8, bg=CARD_BG, highlightthickness=0)
+            canvas.pack(anchor="e", pady=(4, 0))
             detalle_var = tk.StringVar(value="")
-            tk.Label(parent, textvariable=detalle_var, font=F_CAPTION, bg=BG, fg=TEXT_SECONDARY,
+            tk.Label(parent, textvariable=detalle_var, font=F_CAPTION, bg=CARD_BG, fg=TEXT_SECONDARY,
                      anchor="e").pack(anchor="e")
             return canvas, estado_var, estado_label, detalle_var
 
@@ -1522,6 +1589,54 @@ class BitacoraApp:
             canvas.create_polygon(round_rect_points(1, 1, 1 + fill_w, h - 1, radio),
                                    smooth=True, fill=color, outline=color)
 
+    def _build_calendario_mensual(self, parent):
+        tk.Label(parent, text="Días con bitácora", font=F_CAPTION, bg=CARD_BG,
+                 fg=TEXT_SECONDARY).pack(anchor="e")
+        self.calendario_grid = tk.Frame(parent, bg=CARD_BG)
+        self.calendario_grid.pack(anchor="e", pady=(2, 0))
+        for col, letra in enumerate(["L", "M", "X", "J", "V", "S", "D"]):
+            tk.Label(self.calendario_grid, text=letra, font=(F_FAMILY_TEXT, 6),
+                     bg=CARD_BG, fg=TEXT_SECONDARY, width=2).grid(row=0, column=col, pady=(0, 1))
+        self._dibujar_calendario_mensual()
+
+    def _dibujar_calendario_mensual(self):
+        for widget in self.calendario_grid.grid_slaves():
+            if int(widget.grid_info()["row"]) > 0:
+                widget.destroy()
+
+        hoy = date.today()
+        _, dias_en_mes = calendar.monthrange(hoy.year, hoy.month)
+        fila, col = 1, date(hoy.year, hoy.month, 1).weekday()
+        for d in range(1, dias_en_mes + 1):
+            fecha = date(hoy.year, hoy.month, d)
+            entrada = self.data.get(fecha.isoformat(), {})
+            minutos_registrados = 0
+            for act in entrada.get("activities", []):
+                ini = self._minutos(act.get("inicio", ""))
+                fin = self._minutos(act.get("fin", ""))
+                if ini is not None and fin is not None and fin > ini:
+                    minutos_registrados += fin - ini
+            horas_esperadas = horas_esperadas_dia(fecha)
+            # solo cuenta como "bitacora hecha" si llego al menos a la mitad de
+            # las horas esperadas ese dia; tener una sola actividad suelta no basta
+            if horas_esperadas > 0:
+                cumplio = minutos_registrados >= (horas_esperadas * 60) / 2
+            else:
+                cumplio = minutos_registrados > 0
+
+            es_hoy = d == hoy.day
+            tk.Label(
+                self.calendario_grid, text=str(d), font=(F_FAMILY_TEXT, 6),
+                bg=SUCCESS if cumplio else CARD_BG,
+                fg="white" if cumplio else TEXT_SECONDARY,
+                width=2, highlightthickness=1,
+                highlightbackground=ACCENT if es_hoy else (SUCCESS if cumplio else BORDER),
+            ).grid(row=fila, column=col, padx=1, pady=0)
+            col += 1
+            if col > 6:
+                col = 0
+                fila += 1
+
     def _actualizar_reloj(self):
         self.reloj_var.set(datetime.now().strftime("%H:%M:%S"))
         self.root.after(1000, self._actualizar_reloj)
@@ -1536,6 +1651,7 @@ class BitacoraApp:
 
     def actualizar_cumplimiento_mensual(self):
         hoy = date.today()
+        self._dibujar_calendario_mensual()
         horas_esperadas_hoy = horas_esperadas_dia(hoy)
 
         if horas_esperadas_hoy <= 0:
@@ -1613,11 +1729,7 @@ class BitacoraApp:
             .pack(anchor="w", pady=(0, 10))
 
         self.rows_frame = tk.Frame(parent, bg=CARD_BG)
-        self.rows_frame.pack(fill="x", pady=(0, 10))
-
-        RoundedButton(parent, "+  Agregar actividad", command=self.agregar_fila,
-                      bg="#F2F2F7", fg=ACCENT, hover=ACCENT_LIGHT,
-                      width=180, height=34, radius=17, page_bg=CARD_BG).pack(anchor="w")
+        self.rows_frame.pack(fill="x")
 
     def actualizar_contador(self):
         total = sum(len(entrada.get("activities", [])) for entrada in self.data.values())
@@ -1915,10 +2027,6 @@ class BitacoraApp:
 
         btn_frame = tk.Frame(ventana, bg=BG)
         btn_frame.pack(fill="x", padx=24, pady=(8, 0))
-        boton_minimizar = RoundedButton(btn_frame, "Minimizar días", command=None,
-                                         bg="#F2F2F7", fg=TEXT_PRIMARY, hover="#E5E5EA",
-                                         width=120, height=34, radius=17, page_bg=BG)
-        boton_minimizar.pack(side="left", padx=(0, 8))
         boton_semana = RoundedButton(btn_frame, "Minimizar semana", command=None,
                                       bg="#F2F2F7", fg=TEXT_PRIMARY, hover="#E5E5EA",
                                       width=140, height=34, radius=17, page_bg=BG)
@@ -1949,12 +2057,31 @@ class BitacoraApp:
         total_actividades = 0
         minutos_por_tipo = {}
         dias_datos = []
-        bloques_dias = []
+        dias_cuadros = {}
+        dia_abierto = {"fecha": None}
 
         dias_container = tk.Frame(lista, bg=BG)
         dias_container.pack(fill="x")
 
         selector_semanas = tk.Frame(lista, bg=BG)
+
+        def _bind_click_recursivo(widget, callback):
+            widget.bind("<Button-1>", lambda e: callback())
+            for hijo in widget.winfo_children():
+                _bind_click_recursivo(hijo, callback)
+
+        def _toggle_dia(fecha_iso):
+            anterior = dia_abierto["fecha"]
+            if anterior is not None:
+                dias_cuadros[anterior]["contenido"].pack_forget()
+                dias_cuadros[anterior]["chevron"].configure(text="⌄")
+            if anterior == fecha_iso:
+                dia_abierto["fecha"] = None
+                return
+            datos = dias_cuadros[fecha_iso]
+            datos["contenido"].pack(fill="x", padx=2, pady=(0, 14), after=datos["cuadro"])
+            datos["chevron"].configure(text="⌃")
+            dia_abierto["fecha"] = fecha_iso
 
         for nombre, dia in zip(nombres_dias, dias_semana):
             fecha_iso = dia.isoformat()
@@ -1962,40 +2089,45 @@ class BitacoraApp:
             actividades = entrada.get("activities", []) if entrada else []
             dias_datos.append((nombre, fecha_iso, actividades))
 
-            bloque = tk.Frame(dias_container, bg=BG)
-            bloque.pack(fill="x", pady=(14, 4))
-
-            encabezado = tk.Frame(bloque, bg=BG)
-            encabezado.pack(fill="x")
-            tk.Label(encabezado, text=f"{nombre} {fecha_iso}", font=F_LABEL_BOLD,
-                     bg=BG, fg=TEXT_PRIMARY).pack(side="left")
-
-            contenido = tk.Frame(bloque, bg=BG)
-            contenido.pack(fill="x")
-
             dia_minutos = 0
+            for act in actividades:
+                total_actividades += 1
+                ini = self._minutos(act.get("inicio", ""))
+                fin = self._minutos(act.get("fin", ""))
+                if ini is not None and fin is not None and fin > ini:
+                    dur = fin - ini
+                    total_minutos += dur
+                    dia_minutos += dur
+                    tipo = act.get("tipo") or "(sin tipo)"
+                    minutos_por_tipo[tipo] = minutos_por_tipo.get(tipo, 0) + dur
+
+            cuadro = RoundedCard(dias_container, page_bg=BG)
+            cuadro.pack(fill="x", padx=2, pady=(0, 4))
+            cuadro_inner = cuadro.inner
+            cuadro_inner.configure(padx=16, pady=12, cursor="hand2")
+
+            fila = tk.Frame(cuadro_inner, bg=CARD_BG)
+            fila.pack(fill="x")
+            tk.Label(fila, text=f"{nombre} {fecha_iso}", font=F_LABEL_BOLD,
+                     bg=CARD_BG, fg=TEXT_PRIMARY).pack(side="left")
+            dh, dm = divmod(dia_minutos, 60)
+            resumen_texto = (f"{len(actividades)} actividades  ·  {dh}h {dm}min"
+                              if actividades else "Sin actividades guardadas.")
+            tk.Label(fila, text=resumen_texto, font=F_LABEL, bg=CARD_BG,
+                     fg=TEXT_SECONDARY).pack(side="left", padx=(10, 0))
+            chevron = tk.Label(fila, text="⌄", font=F_LABEL_BOLD, bg=CARD_BG, fg=TEXT_SECONDARY)
+            chevron.pack(side="right")
+
+            contenido = tk.Frame(dias_container, bg=BG)
             if not actividades:
                 tk.Label(contenido, text="Sin actividades guardadas.", font=F_LABEL,
                          bg=BG, fg=TEXT_SECONDARY).pack(anchor="w", pady=(0, 4))
             else:
                 for act in actividades:
                     self._crear_card_actividad(contenido, act)
-                    total_actividades += 1
-                    ini = self._minutos(act.get("inicio", ""))
-                    fin = self._minutos(act.get("fin", ""))
-                    if ini is not None and fin is not None and fin > ini:
-                        dur = fin - ini
-                        total_minutos += dur
-                        dia_minutos += dur
-                        tipo = act.get("tipo") or "(sin tipo)"
-                        minutos_por_tipo[tipo] = minutos_por_tipo.get(tipo, 0) + dur
 
-            dh, dm = divmod(dia_minutos, 60)
-            resumen_texto = (f"{len(actividades)} actividades  ·  {dh}h {dm}min"
-                              if actividades else "Sin actividades guardadas.")
-            resumen_label = tk.Label(bloque, text=resumen_texto, font=F_LABEL,
-                                      bg=BG, fg=TEXT_SECONDARY)
-            bloques_dias.append((contenido, resumen_label))
+            dias_cuadros[fecha_iso] = {"cuadro": cuadro, "contenido": contenido, "chevron": chevron}
+            _bind_click_recursivo(cuadro_inner, lambda f=fecha_iso: _toggle_dia(f))
 
         resumen = RoundedCard(lista, page_bg=BG)
         resumen.pack(fill="x", pady=(16, 6), padx=2)
@@ -2014,21 +2146,6 @@ class BitacoraApp:
                      anchor="w").pack(side="left", fill="x", expand=True)
             tk.Label(fila, text=f"{h}h {m}min", font=F_LABEL, bg=CARD_BG,
                      fg=TEXT_SECONDARY).pack(side="right")
-
-        estado = {"minimizado": False}
-
-        def _toggle_minimizar():
-            estado["minimizado"] = not estado["minimizado"]
-            for contenido, resumen_label in bloques_dias:
-                if estado["minimizado"]:
-                    contenido.pack_forget()
-                    resumen_label.pack(anchor="w", pady=(0, 4))
-                else:
-                    resumen_label.pack_forget()
-                    contenido.pack(fill="x")
-            boton_minimizar.set_text("Expandir días" if estado["minimizado"] else "Minimizar días")
-
-        boton_minimizar.command = _toggle_minimizar
 
         estado_semana = {"minimizado": False}
 
