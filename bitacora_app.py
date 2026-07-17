@@ -1,4 +1,6 @@
+import base64
 import calendar
+import ctypes
 import json
 import os
 import re
@@ -1585,6 +1587,7 @@ class BitacoraApp:
         self.root.after(60000, self._tick_periodico)
         threading.Thread(target=_asegurar_tarea_programada, daemon=True).start()
         threading.Thread(target=self._revisar_actualizaciones, daemon=True).start()
+        self.root.after(2000, self._ofrecer_exclusion_defender)
 
         if not self.config.get("tutorial_visto"):
             self.root.after(400, self._mostrar_instrucciones_primera_vez)
@@ -1834,6 +1837,45 @@ class BitacoraApp:
             with open(HEARTBEAT_FILE, "w", encoding="utf-8") as f:
                 f.write(datetime.now().isoformat())
         except OSError:
+            pass
+
+    def _ofrecer_exclusion_defender(self):
+        # Cada build nuevo es un binario que Windows Defender nunca vio: en las
+        # horas/dias despues de publicar un release es cuando mas facil lo marca
+        # como sospechoso (reputacion en cero) y bloquea/pone en cuarentena el
+        # .exe justo durante la autoactualizacion, dejando la app cerrada sin
+        # avisar. Agregar la carpeta a las exclusiones de Defender evita eso.
+        # Se ofrece una sola vez (se recuerda en config) y requiere que el
+        # usuario acepte el permiso de administrador que pide Windows (UAC);
+        # no se puede hacer en silencio porque tocar Defender siempre pide
+        # elevacion.
+        if not getattr(sys, "frozen", False):
+            return
+        if self.config.get("defender_exclusion_ofrecida"):
+            return
+        self.config["defender_exclusion_ofrecida"] = True
+        save_json(CONFIG_FILE, self.config)
+        if not messagebox.askyesno(
+                "Bitácora",
+                "Para que las actualizaciones automáticas no fallen por el "
+                "antivirus, Bitácora puede agregar una excepción de "
+                "seguridad para su propia carpeta en Windows Defender.\n\n"
+                "Windows te va a pedir permiso de administrador una sola "
+                "vez. ¿Agregar la excepción ahora?"):
+            return
+        try:
+            # -EncodedCommand (base64 de UTF-16LE) evita que el comando pase
+            # por ninguna decodificacion de codepage, igual que el .ps1 del
+            # actualizador: asi la ruta se pasa exacta aunque tenga enie o
+            # tildes (ej. usuario "dmuñoz").
+            comando_ps = f"Add-MpPreference -ExclusionPath '{APP_DIR}'"
+            encoded = base64.b64encode(comando_ps.encode("utf-16-le")).decode("ascii")
+            ctypes.windll.shell32.ShellExecuteW(
+                None, "runas", "powershell.exe",
+                f"-NoProfile -WindowStyle Hidden -EncodedCommand {encoded}",
+                None, 0,
+            )
+        except Exception:
             pass
 
     def _revisar_actualizaciones(self):
