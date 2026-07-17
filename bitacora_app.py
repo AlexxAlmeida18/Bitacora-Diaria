@@ -6,6 +6,7 @@ import subprocess
 import sys
 import tempfile
 import threading
+import time
 import unicodedata
 import urllib.request
 import zipfile
@@ -1869,30 +1870,110 @@ class BitacoraApp:
                 z.extractall(extract_dir)
 
             origen = os.path.join(extract_dir, "BitacoraDiaria")
-            if not os.path.isdir(origen):
-                raise RuntimeError("El paquete de actualización no tiene el formato esperado.")
+            exe_path = os.path.join(APP_DIR, "BitacoraDiaria.exe")
+            if not os.path.isdir(origen) or not os.path.isfile(os.path.join(origen, "BitacoraDiaria.exe")):
+                # Se valida ANTES de cerrar la app (con la ventana todavia abierta)
+                # para poder avisar con un mensaje visible; si el antivirus puso en
+                # cuarentena el .exe recien descargado, es aqui donde se nota.
+                raise RuntimeError(
+                    "El paquete descargado no trae BitacoraDiaria.exe. Puede que el "
+                    "antivirus lo haya bloqueado o puesto en cuarentena; revisa el "
+                    "Historial de protección de Windows Defender."
+                )
 
+            # El copiado y reinicio no se pueden hacer desde este mismo proceso
+            # (no se puede sobrescribir el .exe mientras esta corriendo), asi que
+            # se delega a un script aparte que corre despues de que esta app se
+            # cierre. Ese script queda "a ciegas" (sin consola visible), asi que
+            # deja su propio log y revisa cada paso en vez de asumir que salio
+            # bien, para que un fallo silencioso ahi dentro no se sienta como
+            # "se cierra y no pasa nada".
+            #
             # Las rutas van como argumentos de proceso (nunca como texto embebido
             # en el script), asi Windows las pasa en Unicode exacto y no dependen
             # de que cmd.exe adivine el codepage del archivo: eso es lo que rompia
             # nombres de usuario con enie/tildes (ej. "dmuñoz" -> "dmuÃ±oz") pese
             # al chcp 65001 anterior, que no es confiable en toda consola/Windows.
+            # encoding="utf-8-sig" agrega BOM: sin eso, PowerShell 5.1 (el que trae
+            # Windows por defecto) puede leer el .ps1 con el codepage ANSI del
+            # equipo en vez de UTF-8 y romper cualquier tilde/enie embebida en el
+            # texto del script. Ademas, el texto de los mensajes se escribe sin
+            # tildes/enie por si acaso, igual que se hace al pegar en el ERP.
             ps1_path = os.path.join(tmp_dir, "actualizar.ps1")
-            exe_path = os.path.join(APP_DIR, "BitacoraDiaria.exe")
-            with open(ps1_path, "w", encoding="utf-8") as f:
+            with open(ps1_path, "w", encoding="utf-8-sig") as f:
                 f.write(
                     "param($origen, $destino, $exe, $tmp)\r\n"
-                    "Start-Sleep -Seconds 3\r\n"
-                    "robocopy $origen $destino /E /R:5 /W:1 | Out-Null\r\n"
+                    "Add-Type -AssemblyName System.Windows.Forms\r\n"
+                    "$log = Join-Path $destino 'actualizacion_log.txt'\r\n"
+                    "function Log($msg) {\r\n"
+                    "    try { \"$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss') $msg\" | "
+                    "Out-File -FilePath $log -Append -Encoding utf8 } catch {}\r\n"
+                    "}\r\n"
+                    "function Mostrar-Error($msg) {\r\n"
+                    "    Log \"ERROR: $msg\"\r\n"
+                    "    [System.Windows.Forms.MessageBox]::Show($msg, "
+                    "'Bitacora Diaria - Actualizacion', 'OK', 'Error') | Out-Null\r\n"
+                    "}\r\n"
+                    "Log \"Iniciando actualizacion. Origen=$origen Destino=$destino Exe=$exe\"\r\n"
+                    "\r\n"
+                    "$listo = $false\r\n"
+                    "for ($i = 0; $i -lt 30; $i++) {\r\n"
+                    "    try {\r\n"
+                    "        $fs = [System.IO.File]::Open($exe, 'Open', 'ReadWrite', 'None')\r\n"
+                    "        $fs.Close()\r\n"
+                    "        $listo = $true\r\n"
+                    "        break\r\n"
+                    "    } catch {\r\n"
+                    "        Start-Sleep -Milliseconds 500\r\n"
+                    "    }\r\n"
+                    "}\r\n"
+                    "Log \"Espera de liberacion del exe anterior: listo=$listo\"\r\n"
+                    "\r\n"
+                    "$copiaOk = $false\r\n"
+                    "for ($i = 1; $i -le 5; $i++) {\r\n"
+                    "    robocopy $origen $destino /E /R:3 /W:1 | Out-Null\r\n"
+                    "    $code = $LASTEXITCODE\r\n"
+                    "    Log \"robocopy intento $i, codigo de salida $code\"\r\n"
+                    "    if ($code -lt 8) { $copiaOk = $true; break }\r\n"
+                    "    Start-Sleep -Seconds 2\r\n"
+                    "}\r\n"
+                    "\r\n"
+                    "if (-not $copiaOk) {\r\n"
+                    "    Mostrar-Error \"No se pudo completar la actualizacion de Bitacora "
+                    "Diaria (fallo la copia de archivos). Revisa $log o reinstala manualmente "
+                    "desde GitHub. Se reabre la version anterior.\"\r\n"
+                    "    Start-Process -FilePath $exe\r\n"
+                    "    Remove-Item -Recurse -Force $tmp -ErrorAction SilentlyContinue\r\n"
+                    "    exit 1\r\n"
+                    "}\r\n"
+                    "\r\n"
+                    "if (-not (Test-Path $exe)) {\r\n"
+                    "    Mostrar-Error \"La copia se hizo pero no aparecio $exe despues. "
+                    "Revisa $log o reinstala manualmente desde GitHub.\"\r\n"
+                    "    Remove-Item -Recurse -Force $tmp -ErrorAction SilentlyContinue\r\n"
+                    "    exit 1\r\n"
+                    "}\r\n"
+                    "\r\n"
+                    "Log \"Actualizacion completada, reiniciando la app.\"\r\n"
                     "Start-Process -FilePath $exe\r\n"
-                    "Remove-Item -Recurse -Force $tmp\r\n"
+                    "Remove-Item -Recurse -Force $tmp -ErrorAction SilentlyContinue\r\n"
                 )
-            subprocess.Popen(
+            proceso = subprocess.Popen(
                 ["powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", ps1_path,
                  origen, APP_DIR, exe_path, tmp_dir],
                 creationflags=subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP,
                 close_fds=True,
             )
+            # Si powershell.exe ni siquiera pudo arrancar (bloqueado por politica
+            # corporativa, por ejemplo), se nota rapido: se avisa aqui en vez de
+            # cerrar la app y dejar que "no pase nada" sin explicacion.
+            time.sleep(0.5)
+            if proceso.poll() is not None and proceso.returncode not in (0, None):
+                raise RuntimeError(
+                    f"No se pudo iniciar el script de actualización (powershell.exe "
+                    f"devolvió el código {proceso.returncode}). Puede estar bloqueado por "
+                    "una política del equipo; actualiza manualmente desde GitHub."
+                )
             self.root.after(0, self.root.destroy)
         except Exception as exc:
             msg = str(exc)
