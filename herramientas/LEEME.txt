@@ -1,0 +1,21 @@
+HABILITAR ACTUALIZACIONES - Bitacora Diaria
+=============================================
+
+Para que sirve: si a alguien se le cerro Bitacora al intentar actualizar y
+se quedo en una version vieja, es porque Windows Defender bloqueo el .exe
+nuevo durante la actualizacion (falso positivo, pasa con programas sin
+firma digital). Estos dos archivos agregan una excepcion de seguridad para
+que deje de pasar.
+
+Como usarlo en la PC de la persona afectada:
+1. Copia "Habilitar actualizaciones.bat" y "habilitar_actualizaciones.ps1"
+   DENTRO de la carpeta donde esta instalado Bitacora (junto al
+   BitacoraDiaria.exe de esa persona). Los dos archivos deben quedar juntos.
+2. Doble clic en "Habilitar actualizaciones.bat".
+3. Windows va a pedir permiso de administrador (ventana de UAC) - aceptar.
+4. Sale un mensaje confirmando que quedo lista la excepcion.
+5. Abrir Bitacora Diaria normal y darle a "Actualizar" si lo ofrece.
+
+Despues de esto, la version que quede instalada (v1.5.12 en adelante) ya
+pide este mismo permiso ella sola la primera vez que se abre, asi que no
+hace falta volver a usar este script en esa PC.
