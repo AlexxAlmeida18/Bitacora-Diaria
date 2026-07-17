@@ -1170,14 +1170,15 @@ def crear_driver():
     )
 
 
-def fill_erp_form(driver, cedula, tipo, accion, detalle, inicio, fin):
+def fill_erp_form(driver, cedula, tipo, accion, detalle, inicio, fin, maximizar=True):
     from selenium.webdriver.common.by import By
     from selenium.webdriver.common.keys import Keys
     from selenium.webdriver.support.ui import WebDriverWait, Select
     from selenium.webdriver.support import expected_conditions as EC
     from selenium.common.exceptions import TimeoutException
 
-    driver.maximize_window()
+    if maximizar:
+        driver.maximize_window()
     driver.get(ERP_URL)
     wait = WebDriverWait(driver, 20)
     wait.until(EC.presence_of_element_located((By.ID, "input_58_1")))
@@ -1231,6 +1232,50 @@ def fill_erp_form(driver, cedula, tipo, accion, detalle, inicio, fin):
         Select(driver.find_element(By.ID, "input_58_12")).select_by_value(inicio)
     if fin:
         Select(driver.find_element(By.ID, "input_58_13")).select_by_value(fin)
+
+
+def _localizar_boton_enviar(driver, timeout=20):
+    from selenium.webdriver.common.by import By
+    from selenium.webdriver.support.ui import WebDriverWait
+    from selenium.common.exceptions import TimeoutException
+
+    # El id "gform_submit_button_58" es el estandar de Gravity Forms para el
+    # formulario 58 (mismo prefijo que input_58_*), pero se agregan selectores
+    # alternativos por si el ERP cambia el id. Se sondean todos juntos en vez
+    # de esperar el timeout completo de cada uno por turnos.
+    localizadores = [
+        (By.ID, "gform_submit_button_58"),
+        (By.CSS_SELECTOR, "#gform_58 input[type='submit'], #gform_58 button[type='submit']"),
+        (By.XPATH, "//input[@type='submit'][contains(@value, 'Enviar')]"),
+        (By.XPATH, "//button[contains(., 'Enviar')]"),
+    ]
+
+    def _buscar(d):
+        for by, valor in localizadores:
+            try:
+                el = d.find_element(by, valor)
+                if el.is_displayed() and el.is_enabled():
+                    return el
+            except Exception:
+                continue
+        return False
+
+    try:
+        return WebDriverWait(driver, timeout, poll_frequency=0.3).until(_buscar)
+    except TimeoutException:
+        raise TimeoutException("No se encontró el botón 'Enviar' del formulario del ERP.")
+
+
+def submit_erp_form(driver, timeout=20):
+    from selenium.webdriver.support.ui import WebDriverWait
+    from selenium.webdriver.support import expected_conditions as EC
+
+    boton = _localizar_boton_enviar(driver, timeout)
+    boton.click()
+    # staleness_of detecta tanto una recarga completa de pagina como el
+    # reemplazo AJAX del formulario por el mensaje de confirmacion de
+    # Gravity Forms, sin depender de conocer el id exacto de ese mensaje.
+    WebDriverWait(driver, timeout).until(EC.staleness_of(boton))
 
 
 class ActivityRow:
@@ -1420,7 +1465,12 @@ class BitacoraApp:
                       width=180, height=44, radius=22, page_bg=CARD_BG).pack(side="left", padx=(0, 10))
         RoundedButton(actions, "✓  Guardar día", command=self.guardar_dia,
                       bg=ACCENT, fg="white", hover=ACCENT_PRESSED,
-                      width=200, height=44, radius=22, page_bg=CARD_BG).pack(side="left")
+                      width=200, height=44, radius=22, page_bg=CARD_BG).pack(side="left", padx=(0, 10))
+        self.pegar_todas_btn = RoundedButton(
+            actions, "⚡  Pegar todas en ERP", command=self.pegar_todas_en_erp,
+            bg=SUCCESS, fg="white", hover=ACCENT_PRESSED,
+            width=210, height=44, radius=22, page_bg=CARD_BG)
+        self.pegar_todas_btn.pack(side="left")
         self.autoguardado_var = tk.StringVar(value="")
         tk.Label(actions, textvariable=self.autoguardado_var, font=F_CAPTION, bg=CARD_BG, fg=TEXT_SECONDARY)\
             .pack(side="left", padx=(16, 0))
@@ -1463,6 +1513,10 @@ class BitacoraApp:
         self.reloj_var = tk.StringVar(value="")
         tk.Label(titulo_fila, textvariable=self.reloj_var, font=(F_FAMILY_TEXT, 13, "bold"),
                  bg=BG, fg=ACCENT).pack(side="left", padx=(12, 0))
+        ayuda_label = tk.Label(titulo_fila, text="❓ Cómo usar", font=F_CAPTION, bg=BG, fg=ACCENT,
+                                cursor="hand2")
+        ayuda_label.pack(side="right")
+        ayuda_label.bind("<Button-1>", lambda e: self.mostrar_instrucciones())
         tk.Label(header, text="Datadiscol · registra tu día y envíalo al ERP", font=F_CAPTION,
                  bg=BG, fg=TEXT_SECONDARY).pack(anchor="w")
 
@@ -1530,6 +1584,31 @@ class BitacoraApp:
         self.root.after(60000, self._tick_periodico)
         threading.Thread(target=_asegurar_tarea_programada, daemon=True).start()
         threading.Thread(target=self._revisar_actualizaciones, daemon=True).start()
+
+        if not self.config.get("tutorial_visto"):
+            self.root.after(400, self._mostrar_instrucciones_primera_vez)
+
+    def _mostrar_instrucciones_primera_vez(self):
+        self.mostrar_instrucciones()
+        self.config["tutorial_visto"] = True
+        save_json(CONFIG_FILE, self.config)
+
+    def mostrar_instrucciones(self):
+        messagebox.showinfo(
+            "Cómo usar Bitácora Diaria",
+            "Bienvenido a Bitácora Diaria de Datadiscol.\n\n"
+            "1. Escribe tu Cédula arriba (solo la primera vez).\n\n"
+            "2. Por cada actividad, completa Inicio, Fin, Tipo de actividad y "
+            "Detalle. La Acción se sugiere sola según lo que escribas en Detalle.\n\n"
+            "3. \"+ Agregar actividad\" añade una fila nueva para la siguiente actividad.\n\n"
+            "4. \"Pegar en ERP\" (dentro de cada actividad) llena el formulario del ERP con "
+            "esos datos; debes revisar que Nombre y Proyecto/Área queden bien y dar clic "
+            "en Enviar allí tú mismo.\n\n"
+            "5. \"⚡ Pegar todas en ERP\" envía TODAS las actividades pendientes de una vez, "
+            "en el mismo orden en que las escribiste, una por una y de forma automática "
+            "(incluye el clic en Enviar).\n\n"
+            "6. \"✓ Guardar día\" guarda tu bitácora en este computador para no perderla.\n\n"
+            "Puedes volver a ver esta ayuda con el botón \"❓ Cómo usar\" arriba a la derecha.")
 
     def _setup_style(self):
         style = ttk.Style()
@@ -2335,6 +2414,7 @@ class BitacoraApp:
     def _set_pegar_botones_habilitados(self, habilitado):
         for row in self.rows:
             row.pegar_btn.set_enabled(habilitado)
+        self.pegar_todas_btn.set_enabled(habilitado)
 
     def _mostrar_overlay(self, mensaje):
         self._ocultar_overlay()
@@ -2369,6 +2449,20 @@ class BitacoraApp:
         self._set_pegar_botones_habilitados(True)
         self._ocultar_overlay()
 
+    @staticmethod
+    def _resumen_actividad(datos):
+        rango = f"{datos['inicio']}–{datos['fin']}" if (datos.get("inicio") or datos.get("fin")) else "sin horario"
+        partes = [rango]
+        if datos.get("tipo"):
+            partes.append(datos["tipo"])
+        if datos.get("accion"):
+            partes.append(datos["accion"])
+        detalle = datos.get("detalle", "")
+        if len(detalle) > 70:
+            detalle = detalle[:70] + "…"
+        cabecera = " · ".join(partes)
+        return f"{cabecera}\n   {detalle}" if detalle else cabecera
+
     def _pegar_en_erp_worker(self, cedula, datos, row):
         try:
             with self.driver_lock:
@@ -2388,14 +2482,101 @@ class BitacoraApp:
                         if intento == 1:
                             raise
             self.root.after(0, lambda: self.status_var.set(
-                f"Formulario llenado en {self.driver_nombre}. No cierres esa ventana mientras se llena; "
-                "verifica que Nombre y Proyecto/Área hayan quedado bien y da clic en Enviar allí."))
+                f"Formulario llenado en {self.driver_nombre}. Verifica Nombre y Proyecto/Área y da clic en Enviar allí."))
+            self.root.after(0, lambda: messagebox.showinfo(
+                "Bitácora",
+                "Se llenó el formulario del ERP con esta actividad:\n\n"
+                f"{self._resumen_actividad(datos)}\n\n"
+                "Verifica que Nombre y Proyecto/Área hayan quedado bien y da clic en Enviar allí."))
             self.root.after(0, row.marcar_enviado)
         except Exception as exc:
             msg = str(exc)
             self.root.after(0, lambda: messagebox.showerror(
                 "Bitácora", f"No se pudo llenar el formulario en el ERP:\n{msg}"))
             self.root.after(0, lambda: self.status_var.set(""))
+        finally:
+            self.root.after(0, self._terminar_pegar_en_erp)
+
+    def pegar_todas_en_erp(self):
+        if self.pegando_en_erp:
+            return  # ya hay un envio en curso; los botones estan deshabilitados mientras tanto
+        self.guardar_config()
+        cedula = self.cedula_var.get().strip()
+        if not cedula:
+            messagebox.showwarning("Bitácora", "Ingresa tu Cédula arriba antes de usar 'Pegar todas en ERP'.")
+            return
+
+        pendientes = []
+        for row in self.rows:
+            datos = row.get()
+            if row.enviado or not datos["detalle"]:
+                continue
+            pendientes.append((row, datos))
+        if not pendientes:
+            messagebox.showinfo(
+                "Bitácora",
+                "No hay actividades pendientes por enviar (ya están enviadas o no tienen Detalle).")
+            return
+
+        self.pegando_en_erp = True
+        self._set_pegar_botones_habilitados(False)
+        total = len(pendientes)
+        self.status_var.set(f"Enviando {total} actividad(es) al ERP, en orden…")
+        self._mostrar_overlay(f"Enviando actividad 1 de {total}…\nNo cierres esta ventana.")
+        threading.Thread(target=self._pegar_todas_worker, args=(cedula, pendientes), daemon=True).start()
+
+    def _pegar_todas_worker(self, cedula, pendientes):
+        # Recorre las actividades en orden, una a la vez, reutilizando la misma
+        # ventana del navegador (nunca abre una por actividad) y esperando a que
+        # cada envio termine antes de pasar a la siguiente.
+        total = len(pendientes)
+        enviadas = 0
+        datos_enviados = []
+        try:
+            with self.driver_lock:
+                for idx, (row, datos) in enumerate(pendientes, start=1):
+                    self.root.after(0, lambda i=idx: self._mostrar_overlay(
+                        f"Enviando actividad {i} de {total}…\nNo cierres esta ventana."))
+                    for intento in range(2):
+                        if self.driver is None:
+                            self.driver, self.driver_nombre = crear_driver()
+                        try:
+                            fill_erp_form(self.driver, cedula, datos["tipo"], datos["accion"],
+                                          datos["detalle"], datos["inicio"], datos["fin"],
+                                          maximizar=(idx == 1))
+                            submit_erp_form(self.driver)
+                            break
+                        except Exception:
+                            try:
+                                self.driver.quit()
+                            except Exception:
+                                pass
+                            self.driver = None
+                            if intento == 1:
+                                raise
+                    enviadas += 1
+                    datos_enviados.append(datos)
+                    self.root.after(0, row.marcar_enviado)
+            resumen_lineas = "\n\n".join(
+                f"{i}. {self._resumen_actividad(d)}" for i, d in enumerate(datos_enviados, start=1))
+            self.root.after(0, lambda: self.status_var.set(
+                f"Se enviaron {enviadas} de {total} actividad(es) al ERP correctamente."))
+            self.root.after(0, lambda: messagebox.showinfo(
+                "Bitácora",
+                f"Se enviaron {enviadas} de {total} actividad(es) al ERP:\n\n{resumen_lineas}"))
+        except Exception as exc:
+            msg = str(exc)
+            fallida = enviadas + 1
+            resumen_lineas = "\n\n".join(
+                f"{i}. {self._resumen_actividad(d)}" for i, d in enumerate(datos_enviados, start=1))
+            detalle_previas = f"\n\nActividades ya enviadas:\n\n{resumen_lineas}" if datos_enviados else ""
+            self.root.after(0, lambda: messagebox.showerror(
+                "Bitácora",
+                f"Se enviaron {enviadas} de {total} actividad(es).\n"
+                f"Ocurrió un error al enviar la actividad {fallida}:\n{msg}"
+                f"{detalle_previas}"))
+            self.root.after(0, lambda: self.status_var.set(
+                f"Se enviaron {enviadas} de {total} actividad(es); se detuvo por un error."))
         finally:
             self.root.after(0, self._terminar_pegar_en_erp)
 
