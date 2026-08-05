@@ -2400,6 +2400,70 @@ class BitacoraApp:
         except Exception:
             return None
 
+    def _construir_lista_dias(self, parent, dias_datos):
+        """Panel unico con un renglon por dia (con separadores finos, no una
+        tarjeta suelta por dia) y solo para los dias que si tienen actividades:
+        una pila de N tarjetas identicas sin datos era la parte "enredada"."""
+        dias_con_datos = [d for d in dias_datos if d[2]]
+
+        if not dias_con_datos:
+            tk.Label(parent, text="No hay actividades guardadas en este periodo.",
+                     font=F_LABEL, bg=BG, fg=TEXT_SECONDARY).pack(anchor="w", pady=(4, 8))
+            return
+
+        panel = RoundedCard(parent, page_bg=BG)
+        panel.pack(fill="x", padx=2, pady=(0, 4))
+        inner = panel.inner
+
+        filas = {}
+        dia_abierto = {"fecha": None}
+
+        def _bind_click_recursivo(widget, callback):
+            widget.bind("<Button-1>", lambda e: callback())
+            for hijo in widget.winfo_children():
+                _bind_click_recursivo(hijo, callback)
+
+        def _toggle(fecha_iso):
+            anterior = dia_abierto["fecha"]
+            if anterior is not None:
+                filas[anterior]["contenido"].pack_forget()
+                filas[anterior]["chevron"].configure(text="⌄")
+            if anterior == fecha_iso:
+                dia_abierto["fecha"] = None
+                return
+            datos = filas[fecha_iso]
+            datos["contenido"].pack(fill="x", padx=16, pady=(0, 14), after=datos["fila"])
+            datos["chevron"].configure(text="⌃")
+            dia_abierto["fecha"] = fecha_iso
+
+        for idx, (nombre, fecha_iso, actividades) in enumerate(dias_con_datos):
+            if idx > 0:
+                tk.Frame(inner, bg=BORDER, height=1).pack(fill="x")
+
+            dia_minutos = 0
+            for act in actividades:
+                ini = self._minutos(act.get("inicio", ""))
+                fin = self._minutos(act.get("fin", ""))
+                if ini is not None and fin is not None and fin > ini:
+                    dia_minutos += fin - ini
+
+            fila = tk.Frame(inner, bg=CARD_BG, cursor="hand2")
+            fila.pack(fill="x", padx=16, pady=12)
+            tk.Label(fila, text=f"{nombre} {fecha_iso}", font=F_LABEL_BOLD,
+                     bg=CARD_BG, fg=TEXT_PRIMARY).pack(side="left")
+            dh, dm = divmod(dia_minutos, 60)
+            tk.Label(fila, text=f"{len(actividades)} actividades  ·  {dh}h {dm}min", font=F_LABEL,
+                     bg=CARD_BG, fg=TEXT_SECONDARY).pack(side="left", padx=(10, 0))
+            chevron = tk.Label(fila, text="⌄", font=F_LABEL_BOLD, bg=CARD_BG, fg=TEXT_SECONDARY)
+            chevron.pack(side="right")
+
+            contenido = tk.Frame(inner, bg=CARD_BG)
+            for act in actividades:
+                self._crear_card_actividad(contenido, act)
+
+            filas[fecha_iso] = {"fila": fila, "contenido": contenido, "chevron": chevron}
+            _bind_click_recursivo(fila, lambda f=fecha_iso: _toggle(f))
+
     def reporte_semanal(self, fecha=None):
         fecha_str = fecha or self.fecha_var.get().strip() or date.today().isoformat()
         try:
@@ -2423,11 +2487,16 @@ class BitacoraApp:
             except Exception:
                 pass
 
+        dias_con_datos_n = sum(
+            1 for d in dias_semana if self.data.get(d.isoformat(), {}).get("activities"))
+
         titulo_fila = tk.Frame(ventana, bg=BG)
         titulo_fila.pack(fill="x", padx=24, pady=(20, 0))
         tk.Label(titulo_fila, text="Reporte semanal", font=F_TITLE, bg=BG,
                  fg=TEXT_PRIMARY).pack(anchor="w")
-        tk.Label(titulo_fila, text=f"{dias_semana[0].isoformat()} – {dias_semana[-1].isoformat()}",
+        tk.Label(titulo_fila,
+                 text=(f"{dias_semana[0].isoformat()} – {dias_semana[-1].isoformat()}  ·  "
+                       f"{dias_con_datos_n} día(s) con actividad"),
                  font=F_SUBTITLE, bg=BG, fg=TEXT_SECONDARY).pack(anchor="w", pady=(0, 4))
 
         btn_frame = tk.Frame(ventana, bg=BG)
@@ -2462,31 +2531,11 @@ class BitacoraApp:
         total_actividades = 0
         minutos_por_tipo = {}
         dias_datos = []
-        dias_cuadros = {}
-        dia_abierto = {"fecha": None}
 
         dias_container = tk.Frame(lista, bg=BG)
         dias_container.pack(fill="x")
 
         selector_semanas = tk.Frame(lista, bg=BG)
-
-        def _bind_click_recursivo(widget, callback):
-            widget.bind("<Button-1>", lambda e: callback())
-            for hijo in widget.winfo_children():
-                _bind_click_recursivo(hijo, callback)
-
-        def _toggle_dia(fecha_iso):
-            anterior = dia_abierto["fecha"]
-            if anterior is not None:
-                dias_cuadros[anterior]["contenido"].pack_forget()
-                dias_cuadros[anterior]["chevron"].configure(text="⌄")
-            if anterior == fecha_iso:
-                dia_abierto["fecha"] = None
-                return
-            datos = dias_cuadros[fecha_iso]
-            datos["contenido"].pack(fill="x", padx=2, pady=(0, 14), after=datos["cuadro"])
-            datos["chevron"].configure(text="⌃")
-            dia_abierto["fecha"] = fecha_iso
 
         for nombre, dia in zip(nombres_dias, dias_semana):
             fecha_iso = dia.isoformat()
@@ -2494,7 +2543,6 @@ class BitacoraApp:
             actividades = entrada.get("activities", []) if entrada else []
             dias_datos.append((nombre, fecha_iso, actividades))
 
-            dia_minutos = 0
             for act in actividades:
                 total_actividades += 1
                 ini = self._minutos(act.get("inicio", ""))
@@ -2502,37 +2550,10 @@ class BitacoraApp:
                 if ini is not None and fin is not None and fin > ini:
                     dur = fin - ini
                     total_minutos += dur
-                    dia_minutos += dur
                     tipo = act.get("tipo") or "(sin tipo)"
                     minutos_por_tipo[tipo] = minutos_por_tipo.get(tipo, 0) + dur
 
-            cuadro = RoundedCard(dias_container, page_bg=BG)
-            cuadro.pack(fill="x", padx=2, pady=(0, 4))
-            cuadro_inner = cuadro.inner
-            cuadro_inner.configure(padx=16, pady=12, cursor="hand2")
-
-            fila = tk.Frame(cuadro_inner, bg=CARD_BG)
-            fila.pack(fill="x")
-            tk.Label(fila, text=f"{nombre} {fecha_iso}", font=F_LABEL_BOLD,
-                     bg=CARD_BG, fg=TEXT_PRIMARY).pack(side="left")
-            dh, dm = divmod(dia_minutos, 60)
-            resumen_texto = (f"{len(actividades)} actividades  ·  {dh}h {dm}min"
-                              if actividades else "Sin actividades guardadas.")
-            tk.Label(fila, text=resumen_texto, font=F_LABEL, bg=CARD_BG,
-                     fg=TEXT_SECONDARY).pack(side="left", padx=(10, 0))
-            chevron = tk.Label(fila, text="⌄", font=F_LABEL_BOLD, bg=CARD_BG, fg=TEXT_SECONDARY)
-            chevron.pack(side="right")
-
-            contenido = tk.Frame(dias_container, bg=BG)
-            if not actividades:
-                tk.Label(contenido, text="Sin actividades guardadas.", font=F_LABEL,
-                         bg=BG, fg=TEXT_SECONDARY).pack(anchor="w", pady=(0, 4))
-            else:
-                for act in actividades:
-                    self._crear_card_actividad(contenido, act)
-
-            dias_cuadros[fecha_iso] = {"cuadro": cuadro, "contenido": contenido, "chevron": chevron}
-            _bind_click_recursivo(cuadro_inner, lambda f=fecha_iso: _toggle_dia(f))
+        self._construir_lista_dias(dias_container, dias_datos)
 
         resumen = RoundedCard(lista, page_bg=BG)
         resumen.pack(fill="x", pady=(16, 6), padx=2)
@@ -2635,11 +2656,14 @@ class BitacoraApp:
             except Exception:
                 pass
 
+        dias_con_datos_n = sum(
+            1 for d in dias_mes if self.data.get(d.isoformat(), {}).get("activities"))
+
         titulo_fila = tk.Frame(ventana, bg=BG)
         titulo_fila.pack(fill="x", padx=24, pady=(20, 0))
         tk.Label(titulo_fila, text="Reporte mensual", font=F_TITLE, bg=BG,
                  fg=TEXT_PRIMARY).pack(anchor="w")
-        tk.Label(titulo_fila, text=titulo_mes,
+        tk.Label(titulo_fila, text=f"{titulo_mes}  ·  {dias_con_datos_n} día(s) con actividad",
                  font=F_SUBTITLE, bg=BG, fg=TEXT_SECONDARY).pack(anchor="w", pady=(0, 4))
 
         btn_frame = tk.Frame(ventana, bg=BG)
@@ -2674,31 +2698,11 @@ class BitacoraApp:
         total_actividades = 0
         minutos_por_tipo = {}
         dias_datos = []
-        dias_cuadros = {}
-        dia_abierto = {"fecha": None}
 
         dias_container = tk.Frame(lista, bg=BG)
         dias_container.pack(fill="x")
 
         selector_meses = tk.Frame(lista, bg=BG)
-
-        def _bind_click_recursivo(widget, callback):
-            widget.bind("<Button-1>", lambda e: callback())
-            for hijo in widget.winfo_children():
-                _bind_click_recursivo(hijo, callback)
-
-        def _toggle_dia(fecha_iso):
-            anterior = dia_abierto["fecha"]
-            if anterior is not None:
-                dias_cuadros[anterior]["contenido"].pack_forget()
-                dias_cuadros[anterior]["chevron"].configure(text="⌄")
-            if anterior == fecha_iso:
-                dia_abierto["fecha"] = None
-                return
-            datos = dias_cuadros[fecha_iso]
-            datos["contenido"].pack(fill="x", padx=2, pady=(0, 14), after=datos["cuadro"])
-            datos["chevron"].configure(text="⌃")
-            dia_abierto["fecha"] = fecha_iso
 
         for dia in dias_mes:
             nombre = nombres_dias[dia.weekday()]
@@ -2707,7 +2711,6 @@ class BitacoraApp:
             actividades = entrada.get("activities", []) if entrada else []
             dias_datos.append((nombre, fecha_iso, actividades))
 
-            dia_minutos = 0
             for act in actividades:
                 total_actividades += 1
                 ini = self._minutos(act.get("inicio", ""))
@@ -2715,37 +2718,10 @@ class BitacoraApp:
                 if ini is not None and fin is not None and fin > ini:
                     dur = fin - ini
                     total_minutos += dur
-                    dia_minutos += dur
                     tipo = act.get("tipo") or "(sin tipo)"
                     minutos_por_tipo[tipo] = minutos_por_tipo.get(tipo, 0) + dur
 
-            cuadro = RoundedCard(dias_container, page_bg=BG)
-            cuadro.pack(fill="x", padx=2, pady=(0, 4))
-            cuadro_inner = cuadro.inner
-            cuadro_inner.configure(padx=16, pady=12, cursor="hand2")
-
-            fila = tk.Frame(cuadro_inner, bg=CARD_BG)
-            fila.pack(fill="x")
-            tk.Label(fila, text=f"{nombre} {fecha_iso}", font=F_LABEL_BOLD,
-                     bg=CARD_BG, fg=TEXT_PRIMARY).pack(side="left")
-            dh, dm = divmod(dia_minutos, 60)
-            resumen_texto = (f"{len(actividades)} actividades  ·  {dh}h {dm}min"
-                              if actividades else "Sin actividades guardadas.")
-            tk.Label(fila, text=resumen_texto, font=F_LABEL, bg=CARD_BG,
-                     fg=TEXT_SECONDARY).pack(side="left", padx=(10, 0))
-            chevron = tk.Label(fila, text="⌄", font=F_LABEL_BOLD, bg=CARD_BG, fg=TEXT_SECONDARY)
-            chevron.pack(side="right")
-
-            contenido = tk.Frame(dias_container, bg=BG)
-            if not actividades:
-                tk.Label(contenido, text="Sin actividades guardadas.", font=F_LABEL,
-                         bg=BG, fg=TEXT_SECONDARY).pack(anchor="w", pady=(0, 4))
-            else:
-                for act in actividades:
-                    self._crear_card_actividad(contenido, act)
-
-            dias_cuadros[fecha_iso] = {"cuadro": cuadro, "contenido": contenido, "chevron": chevron}
-            _bind_click_recursivo(cuadro_inner, lambda f=fecha_iso: _toggle_dia(f))
+        self._construir_lista_dias(dias_container, dias_datos)
 
         resumen = RoundedCard(lista, page_bg=BG)
         resumen.pack(fill="x", pady=(16, 6), padx=2)
@@ -2823,7 +2799,7 @@ class BitacoraApp:
     def _generar_pdf_semanal(self, dias_semana, dias_datos, total_actividades, total_minutos, minutos_por_tipo):
         subtitulo = f"Semana del {dias_semana[0].isoformat()} al {dias_semana[-1].isoformat()}"
         pdf = _nueva_pdf_reporte("Reporte semanal", subtitulo)
-        _pdf_llenar_dias(pdf, dias_datos)
+        _pdf_llenar_dias(pdf, dias_datos, omitir_dias_vacios=True)
         _pdf_bloque_resumen(pdf, "Resumen de la semana", total_actividades, total_minutos, minutos_por_tipo)
 
         os.makedirs(REPORTS_DIR, exist_ok=True)
@@ -3145,6 +3121,7 @@ def _nueva_pdf_reporte(titulo, subtitulo):
 
 
 def _pdf_llenar_dias(pdf, dias_datos, omitir_dias_vacios=False):
+    algun_dia_impreso = False
     for nombre, fecha_iso, actividades in dias_datos:
         if omitir_dias_vacios and not actividades:
             continue
@@ -3155,6 +3132,14 @@ def _pdf_llenar_dias(pdf, dias_datos, omitir_dias_vacios=False):
             pdf.add_page()
 
         _pdf_dia_bloque(pdf, nombre, fecha_iso, actividades)
+        algun_dia_impreso = True
+
+    if not algun_dia_impreso:
+        pdf.set_font("Helvetica", "I", 10)
+        pdf.set_text_color(*_hex_rgb(TEXT_SECONDARY))
+        pdf.cell(0, 8, "No hay actividades guardadas en este periodo.", new_x="LMARGIN", new_y="NEXT")
+        pdf.set_text_color(0, 0, 0)
+        pdf.ln(4)
 
 
 def _pdf_dia_bloque(pdf, nombre, fecha_iso, actividades):
