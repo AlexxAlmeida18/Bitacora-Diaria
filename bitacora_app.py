@@ -853,6 +853,7 @@ DANGER = "#FF3B30"
 DANGER_LIGHT = "#FFEBEA"
 SUCCESS = "#34C759"
 WARNING = "#FF9500"
+HOLIDAY = "#FFCC00"
 
 F_FAMILY_DISPLAY = "Segoe UI Variable Display"
 F_FAMILY_TEXT = "Segoe UI Variable Text"
@@ -1463,12 +1464,16 @@ class BitacoraApp:
 
         actions = tk.Frame(acciones_inner, bg=CARD_BG)
         actions.pack(fill="x")
-        RoundedButton(actions, "+  Agregar actividad", command=self.agregar_fila,
-                      bg=ACCENT_LIGHT, fg=ACCENT, hover="#D6E9FF",
-                      width=180, height=44, radius=22, page_bg=CARD_BG).pack(side="left", padx=(0, 10))
-        RoundedButton(actions, "✓  Guardar día", command=self.guardar_dia,
-                      bg=ACCENT, fg="white", hover=ACCENT_PRESSED,
-                      width=200, height=44, radius=22, page_bg=CARD_BG).pack(side="left", padx=(0, 10))
+        self.btn_agregar_actividad = RoundedButton(
+            actions, "+  Agregar actividad", command=self.agregar_fila,
+            bg=ACCENT_LIGHT, fg=ACCENT, hover="#D6E9FF",
+            width=180, height=44, radius=22, page_bg=CARD_BG)
+        self.btn_agregar_actividad.pack(side="left", padx=(0, 10))
+        self.btn_guardar_dia = RoundedButton(
+            actions, "✓  Guardar día", command=self.guardar_dia,
+            bg=ACCENT, fg="white", hover=ACCENT_PRESSED,
+            width=200, height=44, radius=22, page_bg=CARD_BG)
+        self.btn_guardar_dia.pack(side="left", padx=(0, 10))
         self.pegar_todas_btn = RoundedButton(
             actions, "⚡  Pegar todas en ERP", command=self.pegar_todas_en_erp,
             bg=SUCCESS, fg="white", hover=ACCENT_PRESSED,
@@ -1597,22 +1602,168 @@ class BitacoraApp:
         self.config["tutorial_visto"] = True
         save_json(CONFIG_FILE, self.config)
 
+    def _pasos_recorrido(self):
+        return [
+            ("Cédula", "Escribe tu Cédula una sola vez, arriba a la izquierda. "
+                        "El ERP completa el Nombre y el Proyecto/Área solos, apenas la detecta.",
+             lambda: self.cedula_entry),
+            ("Fecha y Días guardados", "La fecha de hoy queda puesta sola. Para ver un día anterior, "
+                        "da clic en él dentro de la lista \"Días guardados\".",
+             lambda: [self.fecha_entry, self.historial_combo]),
+            ("+  Agregar actividad", "Agrega una fila nueva por cada actividad: Inicio, Fin, "
+                        "Tipo de actividad y Detalle. La Acción se sugiere sola mientras escribes el Detalle, "
+                        "pero puedes cambiarla si no acierta.",
+             lambda: self.btn_agregar_actividad),
+            ("Pegar en ERP", "Dentro de cada actividad, este botón abre el navegador y llena el formulario "
+                        "del ERP con esos datos. Revisa que el Nombre y el Proyecto/Área hayan quedado bien "
+                        "y da clic en \"Enviar\" tú mismo, allí.",
+             lambda: self.rows[0].pegar_btn if self.rows else None),
+            ("⚡  Pegar todas en ERP", "Envía TODAS las actividades pendientes de una vez, en el mismo orden "
+                        "en que las escribiste, una por una y de forma automática (incluye el clic en Enviar).",
+             lambda: self.pegar_todas_btn),
+            ("✓  Guardar día", "Guarda tu bitácora del día en este computador, para no perderla.",
+             lambda: self.btn_guardar_dia),
+            ("Reporte semanal / Reporte mensual", "Consulta el resumen de tu semana o de tu mes completo, "
+                        "y descárgalo en PDF con el botón \"Descargar PDF\".",
+             lambda: self.btns_reportes),
+            ("Días con bitácora", "En el mini calendario: verde es un día con la bitácora completa, "
+                        "amarillo es un día festivo, y rojo es un día pendiente por llenar.",
+             lambda: self.calendario_grid),
+            ("Eso es todo", "Puedes volver a ver esta ayuda cuando quieras con el botón "
+                        "\"❓ Cómo usar\", arriba a la derecha.",
+             lambda: None),
+        ]
+
     def mostrar_instrucciones(self):
-        messagebox.showinfo(
-            "Cómo usar Bitácora Diaria",
-            "Bienvenido a Bitácora Diaria de Datadiscol.\n\n"
-            "1. Escribe tu Cédula arriba (solo la primera vez).\n\n"
-            "2. Por cada actividad, completa Inicio, Fin, Tipo de actividad y "
-            "Detalle. La Acción se sugiere sola según lo que escribas en Detalle.\n\n"
-            "3. \"+ Agregar actividad\" añade una fila nueva para la siguiente actividad.\n\n"
-            "4. \"Pegar en ERP\" (dentro de cada actividad) llena el formulario del ERP con "
-            "esos datos; debes revisar que Nombre y Proyecto/Área queden bien y dar clic "
-            "en Enviar allí tú mismo.\n\n"
-            "5. \"⚡ Pegar todas en ERP\" envía TODAS las actividades pendientes de una vez, "
-            "en el mismo orden en que las escribiste, una por una y de forma automática "
-            "(incluye el clic en Enviar).\n\n"
-            "6. \"✓ Guardar día\" guarda tu bitácora en este computador para no perderla.\n\n"
-            "Puedes volver a ver esta ayuda con el botón \"❓ Cómo usar\" arriba a la derecha.")
+        pasos = self._pasos_recorrido()
+        self.root.update_idletasks()
+
+        overlay = tk.Toplevel(self.root)
+        overlay.overrideredirect(True)
+        overlay.configure(bg="magenta")
+        try:
+            overlay.attributes("-transparentcolor", "magenta")
+        except tk.TclError:
+            pass
+        overlay.attributes("-topmost", True)
+
+        canvas = tk.Canvas(overlay, bg="magenta", highlightthickness=0)
+        canvas.pack(fill="both", expand=True)
+
+        ANCHO_CALLOUT = 356
+        callout = tk.Frame(overlay, bg=CARD_BG, highlightthickness=1, highlightbackground=BORDER)
+
+        progreso_var = tk.StringVar()
+        tk.Label(callout, textvariable=progreso_var, font=F_CAPTION, bg=CARD_BG,
+                 fg=TEXT_SECONDARY).pack(anchor="w", padx=18, pady=(14, 0))
+
+        titulo_var = tk.StringVar()
+        tk.Label(callout, textvariable=titulo_var, font=F_LABEL_BOLD, bg=CARD_BG, fg=TEXT_PRIMARY,
+                 wraplength=320, justify="left").pack(anchor="w", padx=18, pady=(4, 6))
+
+        texto_var = tk.StringVar()
+        tk.Label(callout, textvariable=texto_var, font=F_LABEL, bg=CARD_BG, fg=TEXT_SECONDARY,
+                 wraplength=320, justify="left").pack(anchor="w", padx=18)
+
+        nav = tk.Frame(callout, bg=CARD_BG)
+        nav.pack(fill="x", padx=18, pady=(14, 16))
+        saltar_label = tk.Label(nav, text="Saltar", font=F_CAPTION, bg=CARD_BG,
+                                 fg=TEXT_SECONDARY, cursor="hand2")
+        saltar_label.pack(side="left")
+        boton_anterior = RoundedButton(nav, "Anterior", command=None,
+                                        bg="#F2F2F7", fg=TEXT_PRIMARY, hover="#E5E5EA",
+                                        width=90, height=32, radius=16, page_bg=CARD_BG)
+        boton_anterior.pack(side="right", padx=(6, 0))
+        boton_siguiente = RoundedButton(nav, "Siguiente", command=None,
+                                         bg=ACCENT, fg="white", hover=ACCENT_PRESSED,
+                                         width=100, height=32, radius=16, page_bg=CARD_BG)
+        boton_siguiente.pack(side="right")
+
+        estado = {"paso": 0}
+
+        def _cerrar():
+            overlay.destroy()
+            if not self.config.get("tutorial_visto"):
+                self.config["tutorial_visto"] = True
+                save_json(CONFIG_FILE, self.config)
+
+        saltar_label.bind("<Button-1>", lambda e: _cerrar())
+        overlay.bind("<Escape>", lambda e: _cerrar())
+
+        def _bbox_widgets(widgets, rx, ry):
+            xs1 = [w.winfo_rootx() - rx for w in widgets]
+            ys1 = [w.winfo_rooty() - ry for w in widgets]
+            xs2 = [w.winfo_rootx() - rx + w.winfo_width() for w in widgets]
+            ys2 = [w.winfo_rooty() - ry + w.winfo_height() for w in widgets]
+            return min(xs1), min(ys1), max(xs2), max(ys2)
+
+        def _dibujar_paso():
+            i = estado["paso"]
+            titulo, texto, obtener_widget = pasos[i]
+            progreso_var.set(f"Paso {i + 1} de {len(pasos)}")
+            titulo_var.set(titulo)
+            texto_var.set(texto)
+            boton_anterior.set_enabled(i > 0)
+            boton_siguiente.set_text("Finalizar" if i == len(pasos) - 1 else "Siguiente")
+
+            self.root.update_idletasks()
+            rx, ry = self.root.winfo_rootx(), self.root.winfo_rooty()
+            rw, rh = self.root.winfo_width(), self.root.winfo_height()
+            overlay.geometry(f"{rw}x{rh}+{rx}+{ry}")
+            canvas.delete("all")
+
+            objetivo = obtener_widget()
+            if objetivo is None:
+                widgets = []
+            elif isinstance(objetivo, list):
+                widgets = [w for w in objetivo if w]
+            else:
+                widgets = [objetivo]
+
+            oscuro = "#1C1C1E"
+            callout.update_idletasks()
+            alto_callout = callout.winfo_reqheight()
+
+            if widgets:
+                pad = 10
+                x1, y1, x2, y2 = _bbox_widgets(widgets, rx, ry)
+                x1, y1, x2, y2 = x1 - pad, y1 - pad, x2 + pad, y2 + pad
+                x1, y1 = max(0, x1), max(0, y1)
+                x2, y2 = min(rw, x2), min(rh, y2)
+
+                canvas.create_rectangle(0, 0, rw, y1, fill=oscuro, outline="", stipple="gray50")
+                canvas.create_rectangle(0, y2, rw, rh, fill=oscuro, outline="", stipple="gray50")
+                canvas.create_rectangle(0, y1, x1, y2, fill=oscuro, outline="", stipple="gray50")
+                canvas.create_rectangle(x2, y1, rw, y2, fill=oscuro, outline="", stipple="gray50")
+                canvas.create_rectangle(x1, y1, x2, y2, outline=ACCENT, width=3)
+
+                callout_y = y2 + 14
+                if callout_y + alto_callout > rh:
+                    callout_y = max(0, y1 - alto_callout - 14)
+                callout_x = min(max(0, x1), max(0, rw - ANCHO_CALLOUT))
+            else:
+                canvas.create_rectangle(0, 0, rw, rh, fill=oscuro, outline="", stipple="gray50")
+                callout_x = (rw - ANCHO_CALLOUT) // 2
+                callout_y = (rh - alto_callout) // 2
+
+            callout.place(x=callout_x, y=callout_y, width=ANCHO_CALLOUT)
+
+        def _anterior():
+            if estado["paso"] > 0:
+                estado["paso"] -= 1
+                _dibujar_paso()
+
+        def _siguiente():
+            if estado["paso"] < len(pasos) - 1:
+                estado["paso"] += 1
+                _dibujar_paso()
+            else:
+                _cerrar()
+
+        boton_anterior.command = _anterior
+        boton_siguiente.command = _siguiente
+
+        _dibujar_paso()
 
     def _setup_style(self):
         style = ttk.Style()
@@ -1641,9 +1792,9 @@ class BitacoraApp:
     def _build_cumplimiento_compacto(self, parent):
         ancho_barra = 190
 
-        def _fila_barra(titulo):
+        def _fila_barra(titulo, espaciado_arriba=0):
             cab = tk.Frame(parent, bg=CARD_BG)
-            cab.pack(fill="x")
+            cab.pack(fill="x", pady=(espaciado_arriba, 0))
             tk.Label(cab, text=titulo, font=F_CAPTION, bg=CARD_BG, fg=TEXT_SECONDARY).pack(side="left")
             estado_var = tk.StringVar(value="")
             estado_label = tk.Label(cab, textvariable=estado_var, font=(F_FAMILY_TEXT, 8, "bold"), bg=CARD_BG)
@@ -1657,6 +1808,8 @@ class BitacoraApp:
 
         (self.cumplimiento_canvas, self.cumplimiento_estado_var,
          self.cumplimiento_estado_label, self.cumplimiento_detalle_var) = _fila_barra("Horas de hoy")
+        (self.mes_canvas, self.mes_estado_var,
+         self.mes_estado_label, self.mes_detalle_var) = _fila_barra("Horas del mes", espaciado_arriba=10)
 
     def _dibujar_barra(self, canvas, ratio, color=None):
         canvas.delete("all")
@@ -1688,6 +1841,7 @@ class BitacoraApp:
                 widget.destroy()
 
         hoy = date.today()
+        festivos = festivos_colombia(hoy.year)
         _, dias_en_mes = calendar.monthrange(hoy.year, hoy.month)
         fila, col = 1, date(hoy.year, hoy.month, 1).weekday()
         for d in range(1, dias_en_mes + 1):
@@ -1707,13 +1861,23 @@ class BitacoraApp:
             else:
                 cumplio = minutos_registrados > 0
 
+            es_festivo = fecha in festivos
             es_hoy = d == hoy.day
+
+            if es_festivo:
+                bg, fg = HOLIDAY, "white"
+            elif cumplio:
+                bg, fg = SUCCESS, "white"
+            elif horas_esperadas > 0 and fecha <= hoy:
+                bg, fg = DANGER, "white"
+            else:
+                bg, fg = CARD_BG, TEXT_SECONDARY
+
             tk.Label(
                 self.calendario_grid, text=str(d), font=(F_FAMILY_TEXT, 6),
-                bg=SUCCESS if cumplio else CARD_BG,
-                fg="white" if cumplio else TEXT_SECONDARY,
+                bg=bg, fg=fg,
                 width=2, highlightthickness=1,
-                highlightbackground=ACCENT if es_hoy else (SUCCESS if cumplio else BORDER),
+                highlightbackground=ACCENT if es_hoy else (bg if bg != CARD_BG else BORDER),
             ).grid(row=fila, column=col, padx=1, pady=0)
             col += 1
             if col > 6:
@@ -1743,6 +1907,7 @@ class BitacoraApp:
             self.cumplimiento_estado_var.set("")
             self.cumplimiento_estado_label.config(fg=TEXT_SECONDARY)
             self._dibujar_barra(self.cumplimiento_canvas, 0.0, BORDER)
+            self._actualizar_horas_mes(hoy)
             return
 
         horas_registradas = 0.0
@@ -1761,6 +1926,34 @@ class BitacoraApp:
         self.cumplimiento_estado_label.config(fg=color)
 
         self._dibujar_barra(self.cumplimiento_canvas, self._cumplimiento_ratio, color)
+        self._actualizar_horas_mes(hoy)
+
+    def _actualizar_horas_mes(self, hoy):
+        horas_esperadas_mes = 0.0
+        horas_registradas_mes = 0.0
+        for d in range(1, hoy.day + 1):
+            fecha = date(hoy.year, hoy.month, d)
+            horas_esperadas_mes += horas_esperadas_dia(fecha)
+            entrada = self.data.get(fecha.isoformat(), {})
+            for act in entrada.get("activities", []):
+                ini = self._minutos(act.get("inicio", ""))
+                fin = self._minutos(act.get("fin", ""))
+                if ini is not None and fin is not None and fin > ini:
+                    horas_registradas_mes += (fin - ini) / 60
+
+        if horas_esperadas_mes <= 0:
+            self.mes_detalle_var.set(f"{horas_registradas_mes:.1f}h registradas")
+            self.mes_estado_var.set("")
+            self.mes_estado_label.config(fg=TEXT_SECONDARY)
+            self._dibujar_barra(self.mes_canvas, 0.0, BORDER)
+            return
+
+        ratio_mes = horas_registradas_mes / horas_esperadas_mes
+        self.mes_detalle_var.set(f"{horas_registradas_mes:.1f}h / {horas_esperadas_mes:.1f}h")
+        nivel, color = self._nivel_3(ratio_mes)
+        self.mes_estado_var.set(nivel)
+        self.mes_estado_label.config(fg=color)
+        self._dibujar_barra(self.mes_canvas, ratio_mes, color)
 
     def _build_datos_card(self, parent):
         parent.configure(padx=20, pady=18)
@@ -1771,9 +1964,9 @@ class BitacoraApp:
         tk.Label(identidad, text="El ERP llena Nombre y Proyecto/Área solo, al detectar la cédula", font=F_CAPTION,
                  bg=CARD_BG, fg=TEXT_SECONDARY).grid(row=0, column=1, sticky="w", padx=(24, 0))
         self.cedula_var = tk.StringVar(value=self.config.get("cedula", ""))
-        cedula_entry = ttk.Entry(identidad, textvariable=self.cedula_var, width=18, style="Modern.TEntry", font=F_LABEL)
-        cedula_entry.grid(row=1, column=0, sticky="w")
-        cedula_entry.bind("<FocusOut>", lambda e: self.guardar_config())
+        self.cedula_entry = ttk.Entry(identidad, textvariable=self.cedula_var, width=18, style="Modern.TEntry", font=F_LABEL)
+        self.cedula_entry.grid(row=1, column=0, sticky="w")
+        self.cedula_entry.bind("<FocusOut>", lambda e: self.guardar_config())
 
         fila = tk.Frame(parent, bg=CARD_BG)
         fila.pack(fill="x")
@@ -1788,22 +1981,18 @@ class BitacoraApp:
         self.historial_combo = ttk.Combobox(fila, width=14, state="readonly",
                                              style="Modern.TCombobox", font=F_LABEL)
         self.historial_combo.grid(row=1, column=1, sticky="w", padx=(24, 0))
+        self.historial_combo.bind("<<ComboboxSelected>>", lambda e: self.ver_dia(self.historial_combo.get()))
         self.refresh_historial()
 
         btns = tk.Frame(fila, bg=CARD_BG)
+        self.btns_reportes = btns
         btns.grid(row=1, column=2, sticky="e", padx=(24, 0))
-        RoundedButton(btns, "Cargar día", command=lambda: self.cargar_dia(),
-                      bg=ACCENT_LIGHT, fg=ACCENT, hover="#D6E9FF",
-                      width=100, height=32, radius=16, page_bg=CARD_BG).pack(side="left", padx=4)
-        RoundedButton(btns, "Ver día", command=lambda: self.ver_dia(),
-                      bg="#F2F2F7", fg=TEXT_PRIMARY, hover="#E5E5EA",
-                      width=90, height=32, radius=16, page_bg=CARD_BG).pack(side="left", padx=4)
         RoundedButton(btns, "Reporte semanal", command=lambda: self.reporte_semanal(),
                       bg="#F2F2F7", fg=TEXT_PRIMARY, hover="#E5E5EA",
                       width=130, height=32, radius=16, page_bg=CARD_BG).pack(side="left", padx=4)
-        RoundedButton(btns, "Día nuevo", command=self.dia_nuevo,
+        RoundedButton(btns, "Reporte mensual", command=lambda: self.reporte_mensual(),
                       bg="#F2F2F7", fg=TEXT_PRIMARY, hover="#E5E5EA",
-                      width=100, height=32, radius=16, page_bg=CARD_BG).pack(side="left", padx=4)
+                      width=130, height=32, radius=16, page_bg=CARD_BG).pack(side="left", padx=4)
         fila.columnconfigure(2, weight=1)
 
     def _build_actividades_card(self, parent):
@@ -2040,6 +2229,18 @@ class BitacoraApp:
             lunes_set.add(d - timedelta(days=d.weekday()))
         return sorted(lunes_set, reverse=True)
 
+    def _meses_disponibles(self):
+        meses_set = set()
+        for fecha_str, entrada in self.data.items():
+            if not entrada.get("activities"):
+                continue
+            try:
+                d = date.fromisoformat(fecha_str)
+            except ValueError:
+                continue
+            meses_set.add((d.year, d.month))
+        return sorted(meses_set, reverse=True)
+
     def refresh_historial(self):
         dias = sorted(self.data.keys(), reverse=True)
         self.historial_combo["values"] = dias
@@ -2089,13 +2290,6 @@ class BitacoraApp:
         for row in self.rows:
             row.destroy()
         self.rows = []
-
-    def dia_nuevo(self):
-        self._cancelar_autoguardado_pendiente()
-        self.fecha_var.set(date.today().isoformat())
-        self.limpiar_filas()
-        self.agregar_fila()
-        self.status_var.set("")
 
     def cargar_dia(self, fecha=None):
         self._cancelar_autoguardado_pendiente()
@@ -2404,57 +2598,239 @@ class BitacoraApp:
                 return
             messagebox.showinfo("Bitácora", f"Reporte guardado en:\n{ruta}")
 
-    def _generar_pdf_semanal(self, dias_semana, dias_datos, total_actividades, total_minutos, minutos_por_tipo):
-        from fpdf import FPDF
+    NOMBRES_MESES = ["Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio", "Julio",
+                      "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre"]
 
-        pdf = FPDF()
-        pdf.set_auto_page_break(auto=True, margin=15)
-        pdf.add_page()
+    def reporte_mensual(self, fecha=None):
+        fecha_str = fecha or self.fecha_var.get().strip() or date.today().isoformat()
+        try:
+            referencia = date.fromisoformat(fecha_str)
+        except ValueError:
+            referencia = date.today()
+        anio, mes = referencia.year, referencia.month
+        _, dias_en_mes = calendar.monthrange(anio, mes)
+        dias_mes = [date(anio, mes, d) for d in range(1, dias_en_mes + 1)]
+        nombres_dias = ["Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado", "Domingo"]
+        titulo_mes = f"{self.NOMBRES_MESES[mes - 1]} {anio}"
 
-        pdf.set_font("Helvetica", "B", 18)
-        pdf.cell(0, 10, "Reporte semanal - Bitacora Datadiscol", new_x="LMARGIN", new_y="NEXT")
-        pdf.set_font("Helvetica", "", 11)
-        pdf.set_text_color(120, 120, 120)
-        pdf.cell(0, 8, f"{dias_semana[0].isoformat()} a {dias_semana[-1].isoformat()}",
-                 new_x="LMARGIN", new_y="NEXT")
-        pdf.set_text_color(0, 0, 0)
-        pdf.ln(4)
+        ventana = tk.Toplevel(self.root)
+        ventana.title(f"Reporte mensual: {titulo_mes}")
+        ventana.configure(bg=BG)
+        win_w, win_h = 680, 640
+        screen_w = ventana.winfo_screenwidth()
+        screen_h = ventana.winfo_screenheight()
+        ventana.geometry(f"{win_w}x{win_h}+{(screen_w - win_w) // 2}+{(screen_h - win_h) // 2}")
+        if os.path.exists(ICON_FILE):
+            try:
+                ventana.iconbitmap(ICON_FILE)
+            except Exception:
+                pass
 
-        for nombre, fecha_iso, actividades in dias_datos:
-            pdf.set_font("Helvetica", "B", 13)
-            pdf.cell(0, 8, f"{nombre} {fecha_iso}", new_x="LMARGIN", new_y="NEXT")
+        titulo_fila = tk.Frame(ventana, bg=BG)
+        titulo_fila.pack(fill="x", padx=24, pady=(20, 0))
+        tk.Label(titulo_fila, text="Reporte mensual", font=F_TITLE, bg=BG,
+                 fg=TEXT_PRIMARY).pack(anchor="w")
+        tk.Label(titulo_fila, text=titulo_mes,
+                 font=F_SUBTITLE, bg=BG, fg=TEXT_SECONDARY).pack(anchor="w", pady=(0, 4))
 
+        btn_frame = tk.Frame(ventana, bg=BG)
+        btn_frame.pack(fill="x", padx=24, pady=(8, 0))
+        boton_mes = RoundedButton(btn_frame, "Minimizar mes", command=None,
+                                   bg="#F2F2F7", fg=TEXT_PRIMARY, hover="#E5E5EA",
+                                   width=130, height=34, radius=17, page_bg=BG)
+        boton_mes.pack(side="left", padx=(0, 8))
+        RoundedButton(btn_frame, "Descargar PDF", command=lambda: _descargar_pdf(),
+                      bg=ACCENT, fg="white", hover=ACCENT_PRESSED,
+                      width=140, height=34, radius=17, page_bg=BG).pack(side="left")
+
+        canvas = tk.Canvas(ventana, bg=BG, highlightthickness=0)
+        scroll = ttk.Scrollbar(ventana, orient="vertical", command=canvas.yview,
+                                style="Modern.Vertical.TScrollbar")
+        canvas.configure(yscrollcommand=scroll.set)
+        canvas.pack(side="left", fill="both", expand=True, padx=(24, 0), pady=(8, 20))
+        scroll.pack(side="right", fill="y", pady=(8, 20))
+
+        lista = tk.Frame(canvas, bg=BG)
+        lista_window = canvas.create_window((0, 0), window=lista, anchor="nw")
+        lista.bind("<Configure>", lambda e: canvas.configure(scrollregion=canvas.bbox("all")))
+        canvas.bind("<Configure>", lambda e: canvas.itemconfig(lista_window, width=e.width))
+
+        def _on_wheel(event):
+            canvas.yview_scroll(int(-event.delta / 120), "units")
+
+        canvas.bind("<Enter>", lambda e: canvas.bind_all("<MouseWheel>", _on_wheel))
+        canvas.bind("<Leave>", lambda e: canvas.unbind_all("<MouseWheel>"))
+
+        total_minutos = 0
+        total_actividades = 0
+        minutos_por_tipo = {}
+        dias_datos = []
+        dias_cuadros = {}
+        dia_abierto = {"fecha": None}
+
+        dias_container = tk.Frame(lista, bg=BG)
+        dias_container.pack(fill="x")
+
+        selector_meses = tk.Frame(lista, bg=BG)
+
+        def _bind_click_recursivo(widget, callback):
+            widget.bind("<Button-1>", lambda e: callback())
+            for hijo in widget.winfo_children():
+                _bind_click_recursivo(hijo, callback)
+
+        def _toggle_dia(fecha_iso):
+            anterior = dia_abierto["fecha"]
+            if anterior is not None:
+                dias_cuadros[anterior]["contenido"].pack_forget()
+                dias_cuadros[anterior]["chevron"].configure(text="⌄")
+            if anterior == fecha_iso:
+                dia_abierto["fecha"] = None
+                return
+            datos = dias_cuadros[fecha_iso]
+            datos["contenido"].pack(fill="x", padx=2, pady=(0, 14), after=datos["cuadro"])
+            datos["chevron"].configure(text="⌃")
+            dia_abierto["fecha"] = fecha_iso
+
+        for dia in dias_mes:
+            nombre = nombres_dias[dia.weekday()]
+            fecha_iso = dia.isoformat()
+            entrada = self.data.get(fecha_iso)
+            actividades = entrada.get("activities", []) if entrada else []
+            dias_datos.append((nombre, fecha_iso, actividades))
+
+            dia_minutos = 0
+            for act in actividades:
+                total_actividades += 1
+                ini = self._minutos(act.get("inicio", ""))
+                fin = self._minutos(act.get("fin", ""))
+                if ini is not None and fin is not None and fin > ini:
+                    dur = fin - ini
+                    total_minutos += dur
+                    dia_minutos += dur
+                    tipo = act.get("tipo") or "(sin tipo)"
+                    minutos_por_tipo[tipo] = minutos_por_tipo.get(tipo, 0) + dur
+
+            cuadro = RoundedCard(dias_container, page_bg=BG)
+            cuadro.pack(fill="x", padx=2, pady=(0, 4))
+            cuadro_inner = cuadro.inner
+            cuadro_inner.configure(padx=16, pady=12, cursor="hand2")
+
+            fila = tk.Frame(cuadro_inner, bg=CARD_BG)
+            fila.pack(fill="x")
+            tk.Label(fila, text=f"{nombre} {fecha_iso}", font=F_LABEL_BOLD,
+                     bg=CARD_BG, fg=TEXT_PRIMARY).pack(side="left")
+            dh, dm = divmod(dia_minutos, 60)
+            resumen_texto = (f"{len(actividades)} actividades  ·  {dh}h {dm}min"
+                              if actividades else "Sin actividades guardadas.")
+            tk.Label(fila, text=resumen_texto, font=F_LABEL, bg=CARD_BG,
+                     fg=TEXT_SECONDARY).pack(side="left", padx=(10, 0))
+            chevron = tk.Label(fila, text="⌄", font=F_LABEL_BOLD, bg=CARD_BG, fg=TEXT_SECONDARY)
+            chevron.pack(side="right")
+
+            contenido = tk.Frame(dias_container, bg=BG)
             if not actividades:
-                pdf.set_font("Helvetica", "", 10)
-                pdf.set_text_color(140, 140, 140)
-                pdf.cell(0, 6, "Sin actividades guardadas.", new_x="LMARGIN", new_y="NEXT")
-                pdf.set_text_color(0, 0, 0)
+                tk.Label(contenido, text="Sin actividades guardadas.", font=F_LABEL,
+                         bg=BG, fg=TEXT_SECONDARY).pack(anchor="w", pady=(0, 4))
             else:
                 for act in actividades:
-                    rango = f"{act.get('inicio', '')} - {act.get('fin', '')}".strip(" -")
-                    encabezado = "  ·  ".join(
-                        p for p in [rango, act.get("tipo", ""), act.get("accion", "")] if p)
-                    if encabezado:
-                        pdf.set_font("Helvetica", "B", 10)
-                        pdf.multi_cell(0, 6, encabezado, new_x="LMARGIN", new_y="NEXT")
-                    if act.get("detalle"):
-                        pdf.set_font("Helvetica", "", 10)
-                        pdf.multi_cell(0, 6, act["detalle"], new_x="LMARGIN", new_y="NEXT")
-                    pdf.ln(2)
-            pdf.ln(3)
+                    self._crear_card_actividad(contenido, act)
 
-        pdf.set_font("Helvetica", "B", 13)
-        pdf.cell(0, 8, "Resumen de la semana", new_x="LMARGIN", new_y="NEXT")
-        pdf.set_font("Helvetica", "", 10)
+            dias_cuadros[fecha_iso] = {"cuadro": cuadro, "contenido": contenido, "chevron": chevron}
+            _bind_click_recursivo(cuadro_inner, lambda f=fecha_iso: _toggle_dia(f))
+
+        resumen = RoundedCard(lista, page_bg=BG)
+        resumen.pack(fill="x", pady=(16, 6), padx=2)
+        inner = resumen.inner
+        inner.configure(padx=16, pady=12)
+        tk.Label(inner, text="Resumen del mes", font=F_LABEL_BOLD, bg=CARD_BG,
+                 fg=TEXT_PRIMARY).pack(anchor="w")
         horas, mins = divmod(total_minutos, 60)
-        pdf.cell(0, 7, f"{total_actividades} actividades - {horas}h {mins}min registradas",
-                 new_x="LMARGIN", new_y="NEXT")
+        tk.Label(inner, text=f"{total_actividades} actividades  ·  {horas}h {mins}min registradas",
+                 font=F_LABEL, bg=CARD_BG, fg=TEXT_SECONDARY).pack(anchor="w", pady=(4, 8))
         for tipo, mins_tipo in sorted(minutos_por_tipo.items(), key=lambda kv: -kv[1]):
             h, m = divmod(mins_tipo, 60)
-            pdf.cell(0, 6, f"  {tipo}: {h}h {m}min", new_x="LMARGIN", new_y="NEXT")
+            fila = tk.Frame(inner, bg=CARD_BG)
+            fila.pack(fill="x", pady=1)
+            tk.Label(fila, text=tipo, font=F_LABEL, bg=CARD_BG, fg=TEXT_PRIMARY,
+                     anchor="w").pack(side="left", fill="x", expand=True)
+            tk.Label(fila, text=f"{h}h {m}min", font=F_LABEL, bg=CARD_BG,
+                     fg=TEXT_SECONDARY).pack(side="right")
+
+        estado_mes = {"minimizado": False}
+
+        def _ir_a_mes(anio_elegido, mes_elegido):
+            ventana.destroy()
+            self.reporte_mensual(fecha=date(anio_elegido, mes_elegido, 1).isoformat())
+
+        def _construir_selector_meses():
+            for w in selector_meses.winfo_children():
+                w.destroy()
+            meses = self._meses_disponibles()
+            if not meses:
+                tk.Label(selector_meses, text="No hay meses con actividades guardadas.",
+                         font=F_LABEL, bg=BG, fg=TEXT_SECONDARY).pack(anchor="w", pady=(0, 4))
+                return
+            tk.Label(selector_meses, text="Elige el mes que quieres ver:", font=F_LABEL_BOLD,
+                     bg=BG, fg=TEXT_PRIMARY).pack(anchor="w", pady=(0, 10))
+            for anio_m, mes_m in meses:
+                _, dias_m = calendar.monthrange(anio_m, mes_m)
+                total_mes = sum(
+                    len(self.data.get(date(anio_m, mes_m, d).isoformat(), {}).get("activities", []))
+                    for d in range(1, dias_m + 1)
+                )
+                es_actual = (anio_m, mes_m) == (anio, mes)
+                texto = f"{self.NOMBRES_MESES[mes_m - 1]} {anio_m}  ·  {total_mes} actividades"
+                if es_actual:
+                    texto += "  (mes actual)"
+                fila = tk.Label(selector_meses, text=texto, font=F_LABEL, bg=BG,
+                                 fg=TEXT_SECONDARY if es_actual else ACCENT,
+                                 cursor="arrow" if es_actual else "hand2", anchor="w")
+                fila.pack(fill="x", pady=4)
+                if not es_actual:
+                    fila.bind("<Button-1>", lambda e, a=anio_m, m=mes_m: _ir_a_mes(a, m))
+
+        def _toggle_mes():
+            estado_mes["minimizado"] = not estado_mes["minimizado"]
+            if estado_mes["minimizado"]:
+                dias_container.pack_forget()
+                _construir_selector_meses()
+                selector_meses.pack(fill="x", before=resumen)
+            else:
+                selector_meses.pack_forget()
+                dias_container.pack(fill="x", before=resumen)
+            boton_mes.set_text("Expandir mes" if estado_mes["minimizado"] else "Minimizar mes")
+
+        boton_mes.command = _toggle_mes
+
+        def _descargar_pdf():
+            try:
+                ruta = self._generar_pdf_mensual(
+                    titulo_mes, dias_datos, total_actividades, total_minutos, minutos_por_tipo)
+            except Exception as exc:
+                messagebox.showerror("Bitácora", f"No se pudo generar el PDF:\n{exc}")
+                return
+            messagebox.showinfo("Bitácora", f"Reporte guardado en:\n{ruta}")
+
+    def _generar_pdf_semanal(self, dias_semana, dias_datos, total_actividades, total_minutos, minutos_por_tipo):
+        subtitulo = f"Semana del {dias_semana[0].isoformat()} al {dias_semana[-1].isoformat()}"
+        pdf = _nueva_pdf_reporte("Reporte semanal", subtitulo)
+        _pdf_llenar_dias(pdf, dias_datos)
+        _pdf_bloque_resumen(pdf, "Resumen de la semana", total_actividades, total_minutos, minutos_por_tipo)
 
         os.makedirs(REPORTS_DIR, exist_ok=True)
         nombre_archivo = f"Reporte_semanal_{dias_semana[0].isoformat()}_a_{dias_semana[-1].isoformat()}.pdf"
+        ruta = os.path.join(REPORTS_DIR, nombre_archivo)
+        pdf.output(ruta)
+        return ruta
+
+    def _generar_pdf_mensual(self, titulo_mes, dias_datos, total_actividades, total_minutos, minutos_por_tipo):
+        subtitulo = f"Mes de {titulo_mes}"
+        pdf = _nueva_pdf_reporte("Reporte mensual", subtitulo)
+        _pdf_llenar_dias(pdf, dias_datos, omitir_dias_vacios=True)
+        _pdf_bloque_resumen(pdf, "Resumen del mes", total_actividades, total_minutos, minutos_por_tipo)
+
+        os.makedirs(REPORTS_DIR, exist_ok=True)
+        nombre_archivo = f"Reporte_mensual_{titulo_mes}".replace(" ", "_") + ".pdf"
         ruta = os.path.join(REPORTS_DIR, nombre_archivo)
         pdf.output(ruta)
         return ruta
@@ -2702,6 +3078,158 @@ class BitacoraApp:
                 f"Se enviaron {enviadas} de {total} actividad(es); se detuvo por un error."))
         finally:
             self.root.after(0, self._terminar_pegar_en_erp)
+
+
+def _hex_rgb(color):
+    color = color.lstrip("#")
+    return tuple(int(color[i:i + 2], 16) for i in (0, 2, 4))
+
+
+def _pdf_minutos(hhmm):
+    try:
+        h, m = hhmm.split(":")
+        return int(h) * 60 + int(m)
+    except Exception:
+        return None
+
+
+def _pdf_asegurar_espacio(pdf, alto):
+    if pdf.get_y() + alto > pdf.page_break_trigger:
+        pdf.add_page()
+
+
+_PDF_CONTENT_TOP = 32
+
+
+def _nueva_pdf_reporte(titulo, subtitulo):
+    from fpdf import FPDF
+
+    class _ReportePDF(FPDF):
+        def header(self):
+            self.set_fill_color(*_hex_rgb(ACCENT))
+            self.rect(0, 0, self.w, 25, style="F")
+            self.set_xy(12, 6)
+            self.set_text_color(255, 255, 255)
+            self.set_font("Helvetica", "B", 17)
+            self.cell(0, 9, titulo, new_x="LMARGIN", new_y="NEXT")
+            self.set_x(12)
+            self.set_font("Helvetica", "", 10)
+            self.cell(0, 6, subtitulo, new_x="LMARGIN", new_y="NEXT")
+            self.set_text_color(0, 0, 0)
+            self.set_y(_PDF_CONTENT_TOP)
+
+        def footer(self):
+            self.set_y(-15)
+            self.set_draw_color(*_hex_rgb(BORDER))
+            self.set_line_width(0.3)
+            self.line(12, self.get_y(), self.w - 12, self.get_y())
+            self.set_font("Helvetica", "", 8)
+            self.set_text_color(*_hex_rgb(TEXT_SECONDARY))
+            self.cell(0, 10, f"Bitacora Datadiscol  -  Pagina {self.page_no()}/{{nb}}", align="C")
+            self.set_text_color(0, 0, 0)
+
+    pdf = _ReportePDF()
+    pdf.alias_nb_pages()
+    pdf.set_auto_page_break(auto=True, margin=22)
+    pdf.add_page()
+    return pdf
+
+
+def _pdf_llenar_dias(pdf, dias_datos, omitir_dias_vacios=False):
+    for nombre, fecha_iso, actividades in dias_datos:
+        if omitir_dias_vacios and not actividades:
+            continue
+
+        with pdf.offset_rendering() as dummy:
+            _pdf_dia_bloque(dummy, nombre, fecha_iso, actividades)
+        if dummy.page_break_triggered and pdf.get_y() > _PDF_CONTENT_TOP:
+            pdf.add_page()
+
+        _pdf_dia_bloque(pdf, nombre, fecha_iso, actividades)
+
+
+def _pdf_dia_bloque(pdf, nombre, fecha_iso, actividades):
+    dia_minutos = 0
+    for act in actividades:
+        ini = _pdf_minutos(act.get("inicio", ""))
+        fin = _pdf_minutos(act.get("fin", ""))
+        if ini is not None and fin is not None and fin > ini:
+            dia_minutos += fin - ini
+    dh, dm = divmod(dia_minutos, 60)
+    resumen = f"{len(actividades)} activ.  -  {dh}h {dm}min" if actividades else "Sin actividades"
+
+    pdf.set_font("Helvetica", "B", 12)
+    pdf.set_text_color(*_hex_rgb(ACCENT))
+    pdf.cell(120, 8, f"{nombre} {fecha_iso}")
+    x_resumen = pdf.get_x()
+    pdf.set_font("Helvetica", "", 9)
+    pdf.set_text_color(*_hex_rgb(TEXT_SECONDARY))
+    pdf.cell(pdf.w - pdf.r_margin - x_resumen, 8, resumen, align="R", new_x="LMARGIN", new_y="NEXT")
+
+    pdf.set_draw_color(*_hex_rgb(BORDER))
+    pdf.set_line_width(0.3)
+    pdf.line(pdf.l_margin, pdf.get_y(), pdf.w - pdf.r_margin, pdf.get_y())
+    pdf.ln(2)
+    pdf.set_text_color(0, 0, 0)
+
+    if not actividades:
+        pdf.set_font("Helvetica", "I", 9)
+        pdf.set_text_color(*_hex_rgb(TEXT_SECONDARY))
+        pdf.cell(0, 6, "  Sin actividades guardadas.", new_x="LMARGIN", new_y="NEXT")
+        pdf.set_text_color(0, 0, 0)
+    else:
+        for act in actividades:
+            rango = f"{act.get('inicio', '')} - {act.get('fin', '')}".strip(" -")
+            pdf.set_font("Helvetica", "B", 9)
+            pdf.set_text_color(*_hex_rgb(ACCENT))
+            pdf.cell(34, 6, rango)
+
+            encabezado = "  -  ".join(p for p in [act.get("tipo", ""), act.get("accion", "")] if p)
+            pdf.set_font("Helvetica", "B", 9)
+            pdf.set_text_color(*_hex_rgb(TEXT_PRIMARY))
+            pdf.multi_cell(0, 6, encabezado or "-", new_x="LMARGIN", new_y="NEXT")
+
+            if act.get("detalle"):
+                pdf.set_x(pdf.l_margin + 34)
+                pdf.set_font("Helvetica", "", 9)
+                pdf.set_text_color(*_hex_rgb(TEXT_SECONDARY))
+                pdf.multi_cell(0, 5.5, act["detalle"], new_x="LMARGIN", new_y="NEXT")
+
+            pdf.set_text_color(0, 0, 0)
+            pdf.ln(1.5)
+
+    pdf.ln(4)
+
+
+def _pdf_bloque_resumen(pdf, titulo, total_actividades, total_minutos, minutos_por_tipo):
+    pdf.set_draw_color(*_hex_rgb(BORDER))
+    pdf.set_line_width(0.4)
+    pdf.line(pdf.l_margin, pdf.get_y(), pdf.w - pdf.r_margin, pdf.get_y())
+    pdf.ln(6)
+
+    pdf.set_font("Helvetica", "B", 14)
+    pdf.set_text_color(*_hex_rgb(TEXT_PRIMARY))
+    pdf.cell(0, 8, titulo, new_x="LMARGIN", new_y="NEXT")
+
+    horas, mins = divmod(total_minutos, 60)
+    pdf.set_font("Helvetica", "", 10)
+    pdf.set_text_color(*_hex_rgb(TEXT_SECONDARY))
+    pdf.cell(0, 7, f"{total_actividades} actividades registradas  -  {horas}h {mins}min en total",
+             new_x="LMARGIN", new_y="NEXT")
+    pdf.ln(2)
+
+    for tipo, mins_tipo in sorted(minutos_por_tipo.items(), key=lambda kv: -kv[1]):
+        h, m = divmod(mins_tipo, 60)
+        _pdf_asegurar_espacio(pdf, 7)
+        y = pdf.get_y()
+        pdf.set_fill_color(*_hex_rgb(ACCENT))
+        pdf.rect(pdf.l_margin, y + 1.3, 3, 3, style="F")
+        pdf.set_x(pdf.l_margin + 6)
+        pdf.set_font("Helvetica", "", 10)
+        pdf.set_text_color(*_hex_rgb(TEXT_PRIMARY))
+        pdf.cell(0, 6, f"{tipo}: {h}h {m}min", new_x="LMARGIN", new_y="NEXT")
+
+    pdf.set_text_color(0, 0, 0)
 
 
 if __name__ == "__main__":
