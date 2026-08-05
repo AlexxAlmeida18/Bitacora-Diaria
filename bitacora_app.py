@@ -2189,10 +2189,19 @@ class BitacoraApp:
                     "Start-Process -FilePath $exe\r\n"
                     "Remove-Item -Recurse -Force $tmp -ErrorAction SilentlyContinue\r\n"
                 )
+            # DETACHED_PROCESS (sin consola) hace que powershell.exe muera apenas esta
+            # app se cierra, antes de llegar a copiar nada: se probo en vivo y el
+            # script ni siquiera alcanza a escribir su primera linea de log. Con
+            # CREATE_NO_WINDOW (consola oculta pero real) + CREATE_BREAKAWAY_FROM_JOB
+            # (se desliga de cualquier "job" de Windows que mate a los hijos cuando el
+            # padre se cierra) el proceso si sobrevive y termina la actualizacion.
+            CREATE_NO_WINDOW = 0x08000000
+            CREATE_BREAKAWAY_FROM_JOB = 0x01000000
             proceso = subprocess.Popen(
                 ["powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", ps1_path,
                  origen, APP_DIR, exe_path, tmp_dir],
-                creationflags=subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP,
+                creationflags=(CREATE_NO_WINDOW | subprocess.CREATE_NEW_PROCESS_GROUP
+                               | CREATE_BREAKAWAY_FROM_JOB),
                 close_fds=True,
             )
             # Si powershell.exe ni siquiera pudo arrancar (bloqueado por politica
