@@ -1327,8 +1327,9 @@ class ActivityRow:
         self.toggle_btn.pack(side="left")
         self.toggle_btn.bind("<Button-1>", lambda e: self.toggle())
         self.badge_var = tk.StringVar(value="")
-        tk.Label(header, textvariable=self.badge_var, font=(F_FAMILY_TEXT, 8, "bold"),
-                 bg=page_bg, fg=SUCCESS).pack(side="left", padx=(0, 6))
+        self.badge_label = tk.Label(header, textvariable=self.badge_var, font=(F_FAMILY_TEXT, 8, "bold"),
+                                     bg=page_bg, fg=SUCCESS)
+        self.badge_label.pack(side="left", padx=(0, 6))
         self.resumen_var = tk.StringVar(value="")
         self.resumen_label = tk.Label(header, textvariable=self.resumen_var, font=F_LABEL,
                                        bg=page_bg, fg=TEXT_PRIMARY, anchor="w", cursor="hand2")
@@ -1396,11 +1397,17 @@ class ActivityRow:
 
     def marcar_enviado(self):
         self.enviado = True
+        self.badge_label.config(fg=SUCCESS)
         self.badge_var.set("✓ Enviado")
         if self.expanded:
             self.toggle()
         if self.on_change:
             self.on_change()
+
+    def marcar_no_enviado(self):
+        self.enviado = False
+        self.badge_label.config(fg=DANGER)
+        self.badge_var.set("✗ No enviado")
 
     def _field(self, parent, label, kind, values, width, page_bg, expand=False):
         wrap = tk.Frame(parent, bg=page_bg)
@@ -3064,6 +3071,7 @@ class BitacoraApp:
                             # los va a rechazar de nuevo: no tiene caso reintentar, y
                             # cerrar el navegador aqui le quitaria al usuario la unica
                             # pantalla donde puede ver que fue lo que fallo.
+                            self.root.after(0, row.marcar_no_enviado)
                             raise
                         except Exception:
                             try:
@@ -3072,6 +3080,7 @@ class BitacoraApp:
                                 pass
                             self.driver = None
                             if intento == 1:
+                                self.root.after(0, row.marcar_no_enviado)
                                 raise
                     enviadas += 1
                     datos_enviados.append(datos)
