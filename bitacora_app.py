@@ -1270,7 +1270,15 @@ def _localizar_boton_enviar(driver, timeout=20):
         raise TimeoutException("No se encontró el botón 'Enviar' del formulario del ERP.")
 
 
+class ErpRechazoError(Exception):
+    """El ERP rechazo el envio (campo obligatorio faltante, dato invalido,
+    etc.). A diferencia de un error de conexion o de un elemento que tardo
+    en aparecer, reintentar con un navegador nuevo no sirve de nada: los
+    datos son los mismos y el ERP los va a rechazar otra vez."""
+
+
 def submit_erp_form(driver, timeout=20):
+    from selenium.webdriver.common.by import By
     from selenium.webdriver.support.ui import WebDriverWait
     from selenium.webdriver.support import expected_conditions as EC
 
@@ -1279,7 +1287,28 @@ def submit_erp_form(driver, timeout=20):
     # staleness_of detecta tanto una recarga completa de pagina como el
     # reemplazo AJAX del formulario por el mensaje de confirmacion de
     # Gravity Forms, sin depender de conocer el id exacto de ese mensaje.
+    # OJO: Gravity Forms tambien reemplaza el formulario por AJAX cuando
+    # falta un campo obligatorio (para mostrarlo en rojo), asi que el boton
+    # "viejo" queda igual de stale en ese caso. staleness_of por si solo NO
+    # distingue "se envio" de "el ERP lo rechazo por un campo faltante" -
+    # de ahi que antes, si el ERP rechazaba una actividad, la app la daba
+    # por enviada y seguia con la siguiente, desordenando el resto del
+    # envio. Por eso se revisa despues cual de los dos paso realmente.
     WebDriverWait(driver, timeout).until(EC.staleness_of(boton))
+
+    def _resultado(d):
+        if d.find_elements(By.ID, "gform_confirmation_wrapper_58"):
+            return "ok"
+        if d.find_elements(By.CSS_SELECTOR, "#gform_wrapper_58.gform_validation_error"):
+            return "error"
+        return False
+
+    resultado = WebDriverWait(driver, timeout, poll_frequency=0.3).until(_resultado)
+    if resultado == "error":
+        raise ErpRechazoError(
+            "El ERP rechazó el envío: falta un campo obligatorio o algún dato no es válido. "
+            "Revisa el formulario en el navegador antes de reintentar."
+        )
 
 
 class ActivityRow:
@@ -3030,6 +3059,12 @@ class BitacoraApp:
                                           maximizar=(idx == 1))
                             submit_erp_form(self.driver)
                             break
+                        except ErpRechazoError:
+                            # Los datos son los mismos en un reintento, asi que el ERP
+                            # los va a rechazar de nuevo: no tiene caso reintentar, y
+                            # cerrar el navegador aqui le quitaria al usuario la unica
+                            # pantalla donde puede ver que fue lo que fallo.
+                            raise
                         except Exception:
                             try:
                                 self.driver.quit()
